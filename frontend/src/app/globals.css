@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  
+  body {
+    background-color: #FFFFFF;
+    color: #111111;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+:root {
+  --primary: #F26522;
+  --secondary: #F8F9FA;
+  --muted: #F8F9FA;
+  --muted-foreground: #6A6F73;
+  --border: #EEEEEE;
+}
+
+@layer base {
+  *:focus {
+    outline: none !important;
+  }
+  
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+}
