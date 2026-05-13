@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from database import create_tables
-from routers import courses, progress, assignments, super_admin, dashboard, user, registration, payment, upload
+from routers import courses, progress, assignments, super_admin, dashboard, user, registration, payment, upload, notifications
 import routes
 import ai_routes
 
@@ -43,6 +43,7 @@ app.include_router(user.router, prefix="/api")
 app.include_router(routes.router, prefix="/api")
 app.include_router(ai_routes.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 
 # Serve uploaded files locally
 if not os.path.exists("uploads"):

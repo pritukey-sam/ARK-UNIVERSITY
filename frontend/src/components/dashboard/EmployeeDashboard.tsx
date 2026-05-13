@@ -109,38 +109,72 @@ export default function EmployeeDashboard() {
                 
                 return (
                   <Link key={course.id} href={`/courses/${course.id}`}>
-                    <Card className="hover:shadow-md transition-all border border-[#eee] bg-white h-full group">
-                      <div className="p-6 space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-[#F26522]">
-                            <BookOpen className="w-6 h-6" />
+                    <Card className="group overflow-hidden border border-[#eee] bg-white hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300 h-full flex flex-col">
+                      {/* Course Image / Banner */}
+                      <div className="relative h-44 w-full overflow-hidden">
+                        {course.thumbnail_url ? (
+                          <img 
+                            src={course.thumbnail_url} 
+                            alt={course.title} 
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-[#F26522]/20 to-[#F26522]/5 flex items-center justify-center">
+                            <BookOpen className="w-10 h-10 text-[#F26522]/40" />
                           </div>
+                        )}
+                        <div className="absolute top-3 right-3">
                           <Badge className={cn(
-                            "border-none text-[10px] font-bold uppercase",
-                            course.status === 'completed' ? "bg-green-100 text-green-600" : "bg-blue-100 text-blue-600"
+                            "shadow-sm border-none text-[10px] font-bold uppercase px-2.5 py-1",
+                            course.status === 'completed' ? "bg-green-500 text-white" : "bg-blue-600 text-white"
                           )}>
                             {course.status === 'completed' ? 'Completed' : 'In Progress'}
                           </Badge>
                         </div>
-                        
-                        <div>
-                          <h3 className="font-bold text-[#111] group-hover:text-[#F26522] transition-colors">{course.title}</h3>
-                          <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{course.description}</p>
+                      </div>
+
+                      <CardContent className="p-5 flex-1 flex flex-col">
+                        <div className="mb-auto">
+                          <h3 className="font-bold text-[#111] text-lg leading-tight line-clamp-2 group-hover:text-[#F26522] transition-colors">
+                            {course.title}
+                          </h3>
+                          <p className="text-sm text-[#6A6F73] mt-2 line-clamp-2 font-medium">
+                            {course.description || "Start your learning journey with this comprehensive curriculum."}
+                          </p>
                         </div>
 
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-xs font-bold text-[#6A6F73]">
-                            <span>Progress</span>
-                            <span>{progress}%</span>
+                        <div className="mt-6 space-y-4">
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-end">
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-bold text-[#6A6F73] uppercase tracking-wider">Course Progress</p>
+                                <p className="text-xs font-bold text-[#111]">
+                                  {course.completed_modules} / {course.total_modules} Modules Completed
+                                </p>
+                              </div>
+                              <span className="text-sm font-bold text-[#F26522]">{progress}%</span>
+                            </div>
+                            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                              <div 
+                                className={cn(
+                                  "h-full transition-all duration-1000 ease-out", 
+                                  course.status === 'completed' ? "bg-green-500" : "bg-[#F26522]"
+                                )} 
+                                style={{ width: `${progress}%` }} 
+                              />
+                            </div>
                           </div>
-                          <div className="h-1.5 w-full bg-white rounded-full overflow-hidden border border-[#eee]">
-                            <div 
-                              className={cn("h-full transition-all duration-500", course.status === 'completed' ? "bg-green-500" : "bg-[#F26522]")} 
-                              style={{ width: `${progress}%` }} 
-                            />
+
+                          <div className="pt-2">
+                            <Button 
+                              className="w-full bg-white border border-[#eee] text-[#111] hover:bg-[#F26522] hover:text-white hover:border-[#F26522] font-bold text-sm h-10 shadow-none transition-all group-hover:shadow-md"
+                            >
+                              {course.status === 'completed' ? 'Review Course' : 'Continue Learning'}
+                              <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
+                            </Button>
                           </div>
                         </div>
-                      </div>
+                      </CardContent>
                     </Card>
                   </Link>
                 );

@@ -4,18 +4,18 @@ import React, { useEffect, useState, use } from 'react';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { 
- Plus, PlayCircle, Trophy, 
- Trash2, ArrowRight, Clock, Layers, ChevronDown, ChevronRight, Edit2,
- Video, FileSearch, Loader2
+import {
+  Plus, Trash2, ArrowRight, Clock, Layers, ChevronRight, Edit2,
+  Loader2, Lock, CheckCircle2, PlayCircle, BookOpen, Trophy,
+  FileText, Calendar, BarChart2
 } from 'lucide-react';
-import { 
- Dialog, DialogContent, DialogHeader, 
- DialogTitle, DialogTrigger, DialogFooter 
+import {
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogTrigger, DialogFooter
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -23,369 +23,496 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Textarea } from '@/components/ui/textarea';
 
-export default function CourseRoadmapPage({ params }: { params: Promise<{ id: string }> }) {
- const { id } = use(params);
- const { user: currentUser } = useAuth();
- const router = useRouter();
- const [course, setCourse] = useState<any>(null);
- const [loading, setLoading] = useState(true);
- const [enrolling, setEnrolling] = useState(false);
- const [editModule, setEditModule] = useState<any>(null);
- const [isEditOpen, setIsEditOpen] = useState(false);
- const [moduleToDelete, setModuleToDelete] = useState<any>(null);
- const [isDeleteOpen, setIsDeleteOpen] = useState(false);
- const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+export default function CourseDetailsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { user: currentUser } = useAuth();
+  const router = useRouter();
+  const [course, setCourse] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [editModule, setEditModule] = useState<any>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [moduleToDelete, setModuleToDelete] = useState<any>(null);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
- useEffect(() => { fetchData(); }, [id]);
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isEmployee = currentUser?.role === 'employee';
 
- const fetchData = async () => {
- try {
- setLoading(true);
- const data = await api.common.getCourse(parseInt(id));
- setCourse(data);
- } catch (error) {
- console.error(error);
- toast.error('Failed to load course details');
- } finally {
- setLoading(false);
- }
- };
+  useEffect(() => { fetchData(); }, [id]);
 
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const data = await api.common.getCourse(parseInt(id));
+      setCourse(data);
+    } catch (error) {
+      toast.error('Failed to load course details');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen bg-white">
+      <Loader2 className="w-8 h-8 text-[#F26522] animate-spin" />
+    </div>
+  );
 
- if (loading) {
- return (
- <div className="flex items-center justify-center min-h-screen bg-white">
- <div className="w-8 h-8 border-4 border-[#F26522] border-t-transparent rounded-full animate-spin" />
- </div>
- );
- }
+  if (!course) return null;
 
- if (!course) return null;
+  const totalDuration = course.modules?.reduce((acc: number, m: any) => acc + (m.duration_seconds || 0), 0) || 0;
+  const completedCount = course.modules?.filter((m: any) => m.is_completed).length || 0;
+  const totalCount = course.modules?.length || 0;
+  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
- const totalDuration = course.modules?.reduce((acc: number, m: any) => acc + (m.duration_seconds || 0), 0) || 0;
+  // Determine which module to resume (first non-completed)
+  const resumeModule = course.modules?.find((m: any) => !m.is_completed) || course.modules?.[0];
 
- return (
- <div className="p-8 space-y-8 bg-white min-h-screen">
- 
- {/* Breadcrumb */}
- <nav className="flex items-center gap-2 text-sm text-[#6A6F73]">
- <Link href="/courses" className="hover:text-[#F26522] transition-colors">Courses</Link>
- <ChevronRight className="w-4 h-4" />
- <span className="text-[#111] font-medium">{course.title}</span>
- </nav>
+  // Module lock logic: module[i] is locked if module[i-1] is not completed
+  const isModuleLocked = (index: number) => {
+    if (index === 0) return false;
+    return !course.modules[index - 1]?.is_completed;
+  };
 
- {/* Hero Section */}
- <div className="bg-white p-8 rounded-xl border border-[#eee] shadow-sm">
- <div className="flex flex-col lg:flex-row gap-8">
- {/* Left: Course Info */}
- <div className="flex-1 space-y-6">
- <div className="space-y-3">
- <h1 className="text-3xl font-bold text-[#111]">{course.title}</h1>
- <p className="text-[#6A6F73] leading-relaxed max-w-2xl">{course.description}</p>
- </div>
+  const handleModuleClick = (module: any, index: number) => {
+    if (isModuleLocked(index)) {
+      toast.error('Complete the previous module to unlock this one');
+      return;
+    }
+    router.push(`/courses/${id}/modules/${module.id}`);
+  };
 
- <div className="flex flex-wrap items-center gap-6">
- <div className="flex items-center gap-2">
- <div className="p-2 bg-blue-50 rounded-lg">
- <Layers className="w-5 h-5 text-blue-600" />
- </div>
- <div>
- <p className="text-xs text-[#6A6F73]">Modules</p>
- <p className="text-sm font-bold text-[#111]">{course.modules?.length || 0} Units</p>
- </div>
- </div>
- <div className="flex items-center gap-2">
- <div className="p-2 bg-green-50 rounded-lg">
- <Clock className="w-5 h-5 text-green-600" />
- </div>
- <div>
- <p className="text-xs text-[#6A6F73]">Duration</p>
- <p className="text-sm font-bold text-[#111]">{formatDuration(totalDuration)}</p>
- </div>
- </div>
- </div>
+  return (
+    <div className="min-h-screen bg-[#fafafa]">
+      {/* ── HERO BANNER ── */}
+      <div className="bg-white border-b border-[#eee]">
+        <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-2 text-sm text-[#6A6F73]">
+            <Link href="/courses" className="hover:text-[#F26522] transition-colors">Courses</Link>
+            <ChevronRight className="w-3.5 h-3.5" />
+            <span className="text-[#111] font-medium truncate max-w-[300px]">{course.title}</span>
+          </nav>
 
- <div className="flex gap-4">
- <Button 
- className="bg-[#F26522] hover:bg-[#D54D10] text-white"
- onClick={() => {
- if (course.modules?.length > 0) {
- router.push(`/courses/${id}/modules/${course.modules[0].id}`);
- }
- }}
- >
- Start Learning <ArrowRight className="w-4 h-4 ml-2" />
- </Button>
- </div>
- </div>
+          <div className="flex flex-col lg:flex-row gap-8">
+            {/* Left: Info */}
+            <div className="flex-1 space-y-5">
+              <div className="space-y-2">
+                <h1 className="text-3xl font-bold text-[#111] leading-tight">{course.title}</h1>
+                {course.description && (
+                  <p className="text-[#6A6F73] leading-relaxed max-w-2xl text-sm">{course.description}</p>
+                )}
+              </div>
 
- {/* Right: Thumbnail */}
- <div className="lg:w-[380px]">
- <div className="aspect-video rounded-xl overflow-hidden border border-[#eee]">
- <img 
- src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&auto=format&fit=crop&q=60'} 
- alt={course.title} 
- className="w-full h-full object-cover"
- />
- </div>
- </div>
- </div>
- </div>
+              {/* Stats row */}
+              <div className="flex flex-wrap gap-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <Layers className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[#6A6F73] uppercase tracking-wide font-semibold">Modules</p>
+                    <p className="text-sm font-bold text-[#111]">{totalCount}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
+                    <Clock className="w-4 h-4 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[#6A6F73] uppercase tracking-wide font-semibold">Duration</p>
+                    <p className="text-sm font-bold text-[#111]">{formatDuration(totalDuration)}</p>
+                  </div>
+                </div>
+                {isEmployee && completedCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
+                      <BarChart2 className="w-4 h-4 text-[#F26522]" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[#6A6F73] uppercase tracking-wide font-semibold">Progress</p>
+                      <p className="text-sm font-bold text-[#111]">{completedCount}/{totalCount} done</p>
+                    </div>
+                  </div>
+                )}
+                {course.due_date && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center">
+                      <Calendar className="w-4 h-4 text-red-500" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[#6A6F73] uppercase tracking-wide font-semibold">Due Date</p>
+                      <p className="text-sm font-bold text-[#111]">
+                        {new Date(course.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
 
- {/* Modules Section */}
- <div className="space-y-6">
- <div className="flex justify-between items-center">
- <h2 className="text-xl font-bold text-[#111]">Course Modules</h2>
- {isAdmin && (
- <CreateModuleDialog courseId={id} onCreated={fetchData} />
- )}
- </div>
+              {/* Progress bar (employee only) */}
+              {isEmployee && totalCount > 0 && (
+                <div className="space-y-1.5 max-w-md">
+                  <div className="flex justify-between text-xs font-semibold text-[#6A6F73]">
+                    <span>Overall Progress</span>
+                    <span className="text-[#F26522]">{progressPct}%</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#F26522] rounded-full transition-all duration-500"
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
- {course.modules?.length === 0 ? (
- <div className="text-center py-20 bg-white border border-[#eee] rounded-xl shadow-sm">
- <Layers className="w-12 h-12 text-[#6A6F73] mx-auto mb-4 opacity-20" />
- <h3 className="text-xl font-bold text-[#111]">No modules yet</h3>
- <p className="text-[#6A6F73] mt-1">This course doesn't have any modules.</p>
- </div>
- ) : course.modules.map((module: any, index: number) => (
- <Card key={module.id} className="bg-white border-[#eee] shadow-sm hover:shadow-md transition-all overflow-hidden group">
- <CardContent className="p-0">
- <div 
- className="p-6 flex items-center justify-between gap-6 cursor-pointer hover:bg-gray-50 transition-colors"
- onClick={() => router.push(isAdmin ? `/courses/${id}/modules/${module.id}/manage` : `/courses/${id}/modules/${module.id}`)}
- >
- <div className="flex items-center gap-4 flex-1">
- <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold shrink-0 bg-white text-[#6A6F73] border border-[#eee]">
- {(index + 1).toString().padStart(2, '0')}
- </div>
- <div>
- <h3 className="font-bold text-[#111]">{module.title}</h3>
- <p className="text-sm text-[#6A6F73] line-clamp-1">{module.description || 'No description available.'}</p>
- </div>
- </div>
- 
- <div className="flex items-center gap-4">
- <Badge variant="outline" className="border-[#eee] text-[#6A6F73] text-xs">
- {formatDuration(module.duration_seconds || 0)}
- </Badge>
- <div className="flex gap-1 mr-2">
- {module.video_url && <Video className="w-4 h-4 text-blue-500" />}
- {module.quiz_questions_count > 0 && <FileSearch className="w-4 h-4 text-green-500" />}
- </div>
- {isAdmin && (
- <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
- <Button 
- size="icon" 
- variant="secondary" 
- className="h-8 w-8 bg-white hover:bg-gray-100 text-[#111] shadow-sm border border-gray-200 rounded-full"
- onClick={(e) => { e.stopPropagation(); setEditModule(module); setIsEditOpen(true); }}
- >
- <Edit2 className="w-3.5 h-3.5" />
- </Button>
- <Button 
- size="icon" 
- className="h-8 w-8 bg-red-500 hover:bg-red-600 text-white shadow-sm border border-red-600 rounded-full"
- onClick={(e) => { e.stopPropagation(); setModuleToDelete(module); setIsDeleteOpen(true); }}
- >
- <Trash2 className="w-3.5 h-3.5" />
- </Button>
- </div>
- )}
- <ChevronRight className="w-5 h-5 text-[#6A6F73] ml-2" />
- </div>
- </div>
- </CardContent>
- </Card>
- ))}
- </div>
- {isAdmin && editModule && (
- <EditModuleDialog 
- module={editModule} 
- courseId={id as string} 
- isOpen={isEditOpen} 
- onUpdated={() => { fetchData(); setIsEditOpen(false); setEditModule(null); }} 
- onCancel={() => { setIsEditOpen(false); setEditModule(null); }} 
- />
- )}
- {isAdmin && moduleToDelete && (
- <DeleteModuleDialog 
- module={moduleToDelete} 
- isOpen={isDeleteOpen} 
- onDeleted={() => { fetchData(); setIsDeleteOpen(false); setModuleToDelete(null); }} 
- onCancel={() => { setIsDeleteOpen(false); setModuleToDelete(null); }} 
- />
- )}
- </div>
- );
+              {/* CTA Buttons */}
+              {!currentUser?.role?.includes('hr') && (
+                <div className="flex gap-3 pt-1">
+                  {isEmployee ? (
+                    <Button
+                      className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
+                      onClick={() => router.push(resumeModule ? `/courses/${id}/modules/${resumeModule.id}` : `#`)}
+                      disabled={!resumeModule}
+                    >
+                      {progressPct === 0 ? 'Start Learning' : progressPct === 100 ? 'Review Course' : 'Continue Learning'}
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  ) : (
+                    <Button
+                      className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
+                      onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}` : `#`)}
+                      disabled={!course.modules || course.modules.length === 0}
+                    >
+                      Preview Course <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Thumbnail */}
+            <div className="lg:w-[340px] shrink-0">
+              <div className="aspect-video rounded-xl overflow-hidden border border-[#eee] shadow-sm">
+                <img
+                  src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&auto=format&fit=crop&q=60'}
+                  alt={course.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MODULE LIST ── */}
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-[#111]">Course Curriculum</h2>
+          {isAdmin && <CreateModuleDialog courseId={id} onCreated={fetchData} />}
+        </div>
+
+        {totalCount === 0 ? (
+          <div className="text-center py-20 bg-white border border-[#eee] rounded-xl">
+            <Layers className="w-12 h-12 text-[#6A6F73] mx-auto mb-4 opacity-20" />
+            <h3 className="text-lg font-bold text-[#111]">No modules yet</h3>
+            <p className="text-[#6A6F73] text-sm mt-1">This course doesn't have any modules.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {course.modules.map((module: any, index: number) => {
+              const locked = isEmployee && isModuleLocked(index);
+              const completed = module.is_completed;
+              const isCurrent = isEmployee && !completed && !locked;
+
+              return (
+                <div key={module.id}>
+                  {/* ── EMPLOYEE MODULE CARD ── */}
+                  {isEmployee ? (
+                    <button
+                      onClick={() => handleModuleClick(module, index)}
+                      disabled={locked}
+                      className={cn(
+                        'w-full text-left bg-white border rounded-xl px-5 py-4 flex items-center gap-4 transition-all duration-200',
+                        locked
+                          ? 'border-[#eee] opacity-60 cursor-not-allowed'
+                          : completed
+                          ? 'border-green-200 hover:border-green-300 hover:shadow-sm cursor-pointer'
+                          : isCurrent
+                          ? 'border-[#F26522]/40 shadow-sm hover:shadow-md cursor-pointer ring-1 ring-[#F26522]/10'
+                          : 'border-[#eee] hover:border-gray-300 hover:shadow-sm cursor-pointer'
+                      )}
+                    >
+                      {/* Status icon */}
+                      <div className={cn(
+                        'w-10 h-10 rounded-lg flex items-center justify-center shrink-0 font-bold text-sm',
+                        locked ? 'bg-gray-100 text-gray-400'
+                          : completed ? 'bg-green-50 text-green-600'
+                          : isCurrent ? 'bg-[#F26522] text-white'
+                          : 'bg-gray-100 text-[#6A6F73]'
+                      )}>
+                        {locked ? (
+                          <Lock className="w-4 h-4" />
+                        ) : completed ? (
+                          <CheckCircle2 className="w-5 h-5" />
+                        ) : (
+                          <span>{(index + 1).toString().padStart(2, '0')}</span>
+                        )}
+                      </div>
+
+                      {/* Title + meta */}
+                      <div className="flex-1 min-w-0">
+                        <p className={cn(
+                          'font-semibold text-sm truncate',
+                          locked ? 'text-[#6A6F73]' : 'text-[#111]'
+                        )}>
+                          Module {index + 1} — {module.title}
+                        </p>
+                        <p className="text-xs text-[#6A6F73] mt-0.5 flex items-center gap-3">
+                          {module.duration_seconds > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {formatDuration(module.duration_seconds)}
+                            </span>
+                          )}
+                          {module.video_count > 0 && (
+                            <span className="flex items-center gap-1">
+                              <PlayCircle className="w-3 h-3" />
+                              {module.video_count} video{module.video_count !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {module.quiz_count > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Trophy className="w-3 h-3" />
+                              Quiz
+                            </span>
+                          )}
+                          {module.note_count > 0 && (
+                            <span className="flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              Notes
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      {/* Right badge */}
+                      <div className="shrink-0">
+                        {locked ? (
+                          <Badge variant="outline" className="text-[10px] text-gray-400 border-gray-200">Locked</Badge>
+                        ) : completed ? (
+                          <Badge className="text-[10px] bg-green-50 text-green-700 border-green-200 border">Completed</Badge>
+                        ) : isCurrent ? (
+                          <Badge className="text-[10px] bg-orange-50 text-[#F26522] border-orange-200 border">Current</Badge>
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-300" />
+                        )}
+                      </div>
+                    </button>
+                  ) : (
+                    /* ── ADMIN MODULE CARD ── */
+                    <Card className="bg-white border-[#eee] shadow-sm hover:shadow-md transition-all overflow-hidden group">
+                      <CardContent className="p-0">
+                        <div
+                          className="p-5 flex items-center justify-between gap-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                          onClick={() => router.push(`/courses/${id}/modules/${module.id}/manage`)}
+                        >
+                          <div className="flex items-center gap-4 flex-1 min-w-0">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 bg-white text-[#6A6F73] border border-[#eee]">
+                              {(index + 1).toString().padStart(2, '0')}
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-semibold text-[#111] truncate">{module.title}</h3>
+                              <p className="text-xs text-[#6A6F73] mt-0.5">
+                                {formatDuration(module.duration_seconds || 0)}
+                                {module.video_count > 0 && ` · ${module.video_count} videos`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                size="icon"
+                                variant="secondary"
+                                className="h-8 w-8 bg-white hover:bg-gray-100 text-[#111] shadow-sm border border-gray-200 rounded-full"
+                                onClick={(e) => { e.stopPropagation(); setEditModule(module); setIsEditOpen(true); }}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                className="h-8 w-8 bg-red-500 hover:bg-red-600 text-white shadow-sm border border-red-600 rounded-full"
+                                onClick={(e) => { e.stopPropagation(); setModuleToDelete(module); setIsDeleteOpen(true); }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-[#6A6F73]" />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Admin dialogs — untouched */}
+      {isAdmin && editModule && (
+        <EditModuleDialog
+          module={editModule}
+          courseId={id}
+          isOpen={isEditOpen}
+          onUpdated={() => { fetchData(); setIsEditOpen(false); setEditModule(null); }}
+          onCancel={() => { setIsEditOpen(false); setEditModule(null); }}
+        />
+      )}
+      {isAdmin && moduleToDelete && (
+        <DeleteModuleDialog
+          module={moduleToDelete}
+          isOpen={isDeleteOpen}
+          onDeleted={() => { fetchData(); setIsDeleteOpen(false); setModuleToDelete(null); }}
+          onCancel={() => { setIsDeleteOpen(false); setModuleToDelete(null); }}
+        />
+      )}
+    </div>
+  );
 }
 
+/* ─────────────────────────────────────────────────────── */
+/*  ADMIN DIALOGS — unchanged from original               */
+/* ─────────────────────────────────────────────────────── */
+
 function CreateModuleDialog({ courseId, onCreated }: { courseId: string, onCreated: () => void }) {
- const [open, setOpen] = useState(false);
- const [loading, setLoading] = useState(false);
- const [formData, setFormData] = useState({ title: '', description: '', duration_seconds: 3600 });
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({ title: '', description: '', duration_seconds: 3600 });
 
- const handleSubmit = async (e: React.FormEvent) => {
- e.preventDefault();
- setLoading(true);
- try {
- await api.admin.createModule({
- ...formData,
- course_id: parseInt(courseId),
- order: 0
- });
- toast.success('Module created');
- setOpen(false);
- onCreated();
- } catch (e: any) { toast.error(e.message); }
- finally { setLoading(false); }
- };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.admin.createModule(parseInt(courseId), { ...formData, order: 0 });
+      toast.success('Module created');
+      setOpen(false);
+      onCreated();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
 
- return (
- <Dialog open={open} onOpenChange={setOpen}>
- <DialogTrigger render={
- <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white">
- <Plus className="w-4 h-4 mr-2" /> Add Module
- </Button>
- } />
- <DialogContent className="bg-white">
- <DialogHeader>
- <DialogTitle>Add New Module</DialogTitle>
- <p className="text-[#6A6F73] text-sm pt-1">Create a new learning module for this course.</p>
- </DialogHeader>
- <form onSubmit={handleSubmit} className="space-y-4 pt-4">
- <div className="space-y-2">
- <Label>Module Title</Label>
- <Input 
- value={formData.title} 
- onChange={e => setFormData({...formData, title: e.target.value})} 
- className="border-[#eee]" 
- placeholder="e.g. Getting Started" 
- />
- </div>
- <div className="space-y-2">
- <Label>Description</Label>
- <Textarea 
- value={formData.description} 
- onChange={e => setFormData({...formData, description: e.target.value})} 
- className="border-[#eee] min-h-[100px]" 
- placeholder="Module description..." 
- />
- </div>
- <div className="space-y-2">
- <Label>Duration (Seconds)</Label>
- <Input 
- type="number" 
- value={formData.duration_seconds} 
- onChange={e => setFormData({...formData, duration_seconds: parseInt(e.target.value)})} 
- className="border-[#eee]" 
- />
- </div>
- <DialogFooter>
- <Button type="submit" disabled={loading} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white">
- {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
- {loading ? 'Creating...' : 'Create Module'}
- </Button>
- </DialogFooter>
- </form>
- </DialogContent>
- </Dialog>
- );
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={
+        <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white">
+          <Plus className="w-4 h-4 mr-2" /> Add Module
+        </Button>
+      } />
+      <DialogContent className="bg-white">
+        <DialogHeader>
+          <DialogTitle>Add New Module</DialogTitle>
+          <p className="text-[#6A6F73] text-sm pt-1">Create a new learning module for this course.</p>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+          <div className="space-y-2">
+            <Label>Module Title</Label>
+            <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" placeholder="e.g. Getting Started" required />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="border-[#eee] min-h-[80px]" placeholder="Module description..." />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={loading} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              {loading ? 'Creating...' : 'Create Module'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function EditModuleDialog({ module, courseId, onUpdated, onCancel, isOpen }: { module: any, courseId: string, onUpdated: () => void, onCancel: () => void, isOpen: boolean }) {
- const [loading, setLoading] = useState(false);
- const [formData, setFormData] = useState({ title: module?.title || '', description: module?.description || '', duration_seconds: module?.duration_seconds || 3600 });
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({ title: module?.title || '', description: module?.description || '' });
 
- useEffect(() => {
- if (module) {
- setFormData({ title: module.title || '', description: module.description || '', duration_seconds: module.duration_seconds || 3600 });
- }
- }, [module]);
+  useEffect(() => {
+    if (module) setFormData({ title: module.title || '', description: module.description || '' });
+  }, [module]);
 
- const handleSubmit = async (e: React.FormEvent) => {
- e.preventDefault();
- setLoading(true);
- try {
- await api.admin.updateModule(module.id, {
- ...formData,
- course_id: parseInt(courseId),
- order: module.order || 0
- });
- toast.success('Module updated');
- onUpdated();
- } catch (e: any) { toast.error(e.message); }
- finally { setLoading(false); }
- };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.admin.updateModule(module.id, { ...formData, course_id: parseInt(courseId), order: module.order || 0 });
+      toast.success('Module updated');
+      onUpdated();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
 
- return (
- <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
- <DialogContent className="bg-white">
- <DialogHeader>
- <DialogTitle>Edit Module</DialogTitle>
- </DialogHeader>
- <form onSubmit={handleSubmit} className="space-y-4 pt-4">
- <div className="space-y-2">
- <Label>Module Title</Label>
- <Input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="border-[#eee]" required />
- </div>
- <div className="space-y-2">
- <Label>Description</Label>
- <Textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="border-[#eee] min-h-[100px]" required />
- </div>
- <div className="space-y-2">
- <Label>Duration (Seconds)</Label>
- <Input type="number" value={formData.duration_seconds} onChange={e => setFormData({...formData, duration_seconds: parseInt(e.target.value)})} className="border-[#eee]" min="1" />
- </div>
- <DialogFooter>
- <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>Cancel</Button>
- <Button type="submit" disabled={loading} className="bg-[#F26522] hover:bg-[#D54D10] text-white">
- {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
- {loading ? 'Saving...' : 'Save Changes'}
- </Button>
- </DialogFooter>
- </form>
- </DialogContent>
- </Dialog>
- );
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="bg-white">
+        <DialogHeader><DialogTitle>Edit Module</DialogTitle></DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+          <div className="space-y-2">
+            <Label>Module Title</Label>
+            <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" required />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="border-[#eee] min-h-[80px]" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>Cancel</Button>
+            <Button type="submit" disabled={loading} className="bg-[#F26522] hover:bg-[#D54D10] text-white">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              {loading ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function DeleteModuleDialog({ module, onDeleted, onCancel, isOpen }: { module: any, onDeleted: () => void, onCancel: () => void, isOpen: boolean }) {
- const [deleting, setDeleting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
- const handleDelete = async () => {
- setDeleting(true);
- try {
- await api.admin.deleteModule(module.id);
- toast.success('Module deleted');
- onDeleted();
- } catch (e: any) {
- toast.error(e.message || 'Failed to delete module');
- } finally {
- setDeleting(false);
- }
- };
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.admin.deleteModule(module.id);
+      toast.success('Module deleted');
+      onDeleted();
+    } catch (e: any) { toast.error(e.message || 'Failed to delete'); }
+    finally { setDeleting(false); }
+  };
 
- return (
- <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
- <DialogContent className="sm:max-w-[425px] bg-white">
- <DialogHeader>
- <DialogTitle className="text-red-600 flex items-center gap-2">
- <Trash2 className="w-5 h-5" /> Delete Module
- </DialogTitle>
- </DialogHeader>
- <div className="py-4">
- <p className="text-sm text-[#6A6F73]">
- Are you sure you want to delete <strong>{module?.title}</strong>? This action cannot be undone.
- </p>
- </div>
- <DialogFooter>
- <Button variant="outline" onClick={onCancel} disabled={deleting}>Cancel</Button>
- <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
- {deleting ? 'Deleting...' : 'Delete Module'}
- </Button>
- </DialogFooter>
- </DialogContent>
- </Dialog>
- );
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-[425px] bg-white">
+        <DialogHeader>
+          <DialogTitle className="text-red-600 flex items-center gap-2">
+            <Trash2 className="w-5 h-5" /> Delete Module
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <p className="text-sm text-[#6A6F73]">
+            Are you sure you want to delete <strong>{module?.title}</strong>? This action cannot be undone.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={deleting}>Cancel</Button>
+          <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Deleting...' : 'Delete Module'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

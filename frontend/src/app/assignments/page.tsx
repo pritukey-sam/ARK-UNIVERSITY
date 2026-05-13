@@ -4,13 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
-import { FileText, Plus, CheckCircle2, XCircle, Clock, Calendar, Check, X } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FileText, Plus, CheckCircle2, XCircle, Clock, Calendar, Check, X, AlertCircle, Bookmark, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function AssignmentsPage() {
@@ -20,6 +21,8 @@ export default function AssignmentsPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [filter, setFilter] = useState('All');
+  const [submitting, setSubmitting] = useState(false);
   
   const [formData, setFormData] = useState({
     user_id: '',
@@ -50,7 +53,9 @@ export default function AssignmentsPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    if (user) {
+      fetchData();
+    }
   }, [user]);
 
   const handleNewRequest = async (e: React.FormEvent) => {
@@ -58,6 +63,7 @@ export default function AssignmentsPage() {
     if (!formData.user_id || !formData.course_id) {
       return toast.error("Please select an employee and course");
     }
+    setSubmitting(true);
     try {
       await api.assignments.request({
         user_id: parseInt(formData.user_id),
@@ -66,12 +72,14 @@ export default function AssignmentsPage() {
         requested_due_date: formData.requested_due_date ? new Date(formData.requested_due_date).toISOString() : undefined,
         note: formData.note || undefined
       });
-      toast.success("Assignment request submitted for approval");
+      toast.success("Course assigned successfully");
       setIsAddModalOpen(false);
       setFormData({ user_id: '', course_id: '', requested_due_date: '', note: '' });
       fetchData();
     } catch (error: any) {
-      toast.error(error.message || "Failed to submit request");
+      toast.error(error.message || "Failed to submit assignment");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -95,76 +103,155 @@ export default function AssignmentsPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
+  const handleCancel = async (id: number) => {
+    try {
+      await api.assignments.cancel(id);
+      toast.success("Assignment cancelled");
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to cancel assignment");
+    }
+  };
+
+  const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
+  
+  const formatDateTime = (dateStr: string | null) => {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getComputedDueDate = (req: any) => {
+    if (req.requested_due_date) return new Date(req.requested_due_date);
+    const durationDays = req.completion_duration_days || 30;
+    const baseDate = req.approval_timestamp ? new Date(req.approval_timestamp) : new Date(req.created_at);
+    const dueDate = new Date(baseDate);
+    dueDate.setDate(dueDate.getDate() + durationDays);
+    return dueDate;
+  };
+
+  const getComputedStatus = (req: any) => {
+    if (req.status === 'approved') {
+      const dueDate = getComputedDueDate(req);
+      if (dueDate && new Date() > dueDate && (req.progress_percent || 0) < 100) {
+        return 'overdue';
+      }
+    }
+    return req.status;
+  };
+
+  const getRemainingDays = (req: any) => {
+    const computedStatus = getComputedStatus(req);
+    if (computedStatus === 'rejected') return '-';
+    
+    const dueDate = getComputedDueDate(req);
+    if (!dueDate) return 'No due date';
+
+    const diffTime = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffTime < 0) return `Overdue by ${Math.abs(diffTime)} days`;
+    if (diffTime === 0) return 'Due today';
+    if (diffTime === 1) return '1 day left';
+    return `${diffTime} days left`;
+  };
+
+  const filteredRequests = requests.filter(req => {
+    const computedStatus = getComputedStatus(req);
+    if (filter === 'All') return true;
+    if (filter === 'Pending') return computedStatus === 'pending';
+    if (filter === 'Approved') return computedStatus === 'approved';
+    if (filter === 'Rejected') return computedStatus === 'rejected';
+    if (filter === 'Overdue') return computedStatus === 'overdue';
+    return true;
+  });
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between">
+    <div className="p-8 max-w-full mx-auto space-y-8 bg-[#f8f9fa] min-h-screen animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-[#111]">Assignments {user?.role === 'admin' ? 'Approval' : 'Management'}</h1>
-          <p className="text-[#6A6F73] mt-2 text-lg">
-            {user?.role === 'admin' ? 'Review and approve pending assignment requests from HR.' : 'Manage course assignments and track approval status.'}
+          <h1 className="text-3xl font-extrabold text-[#111] tracking-tight">Assignment Management</h1>
+          <p className="text-[#6A6F73] mt-2 text-sm font-medium">
+            {user?.role === 'admin' ? 'Review and manage all corporate learning assignments.' : 'Assign courses to your workforce and track progress.'}
           </p>
         </div>
         {user?.role === 'hr' && (
           <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white shadow-lg shadow-orange-100 font-bold h-11 px-6 rounded-xl">
-                <Plus className="w-5 h-5 mr-2" /> Request Assignment
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-white sm:max-w-md rounded-2xl border-none shadow-2xl">
+            <DialogTrigger
+              render={
+                <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white shadow-sm transition-all hover:scale-[1.02]">
+                  <Bookmark className="w-4 h-4 mr-2" /> Assign Course
+                </Button>
+              }
+            />
+            <DialogContent className="sm:max-w-[450px]">
               <DialogHeader>
-                <DialogTitle className="text-xl font-black text-[#111]">New Assignment Request</DialogTitle>
-                <DialogDescription>Submit a course assignment request to Admin for approval.</DialogDescription>
+                <DialogTitle>Assign Course</DialogTitle>
+                <DialogDescription>Enroll a user into a specific course.</DialogDescription>
               </DialogHeader>
-              <form onSubmit={handleNewRequest} className="space-y-4 pt-4">
+              <form onSubmit={handleNewRequest} className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-[#6A6F73]">Employee</Label>
-                  <select 
-                    className="w-full h-11 px-3 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#F26522] outline-none"
-                    value={formData.user_id}
-                    onChange={e => setFormData({...formData, user_id: e.target.value})}
-                  >
-                    <option value="">Select an employee...</option>
-                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
+                  <Label>Select User</Label>
+                  <Select value={formData.user_id} onValueChange={v => setFormData({...formData, user_id: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a learner...">
+                        {formData.user_id ? (() => {
+                          const u = users?.find(u => u.id.toString() === formData.user_id);
+                          return u ? `${u.name} (${u.email})` : undefined;
+                        })() : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users?.map(u => (
+                        <SelectItem key={u.id} value={u.id.toString()}>{u.name} ({u.email})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-[#6A6F73]">Course</Label>
-                  <select 
-                    className="w-full h-11 px-3 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#F26522] outline-none"
-                    value={formData.course_id}
-                    onChange={e => setFormData({...formData, course_id: e.target.value})}
-                  >
-                    <option value="">Select a course...</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                  </select>
+                  <Label>Select Course</Label>
+                  <Select value={formData.course_id} onValueChange={v => setFormData({...formData, course_id: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a course...">
+                        {formData.course_id ? courses?.find(c => c.id.toString() === formData.course_id)?.title : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {courses?.map(c => (
+                        <SelectItem key={c.id} value={c.id.toString()}>{c.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-[#6A6F73]">Requested Due Date (Optional)</Label>
+                  <Label>Due Date (Optional)</Label>
                   <Input 
                     type="date"
                     value={formData.requested_due_date}
                     onChange={e => setFormData({...formData, requested_due_date: e.target.value})}
-                    className="border-gray-200 h-11 rounded-xl"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase tracking-widest text-[#6A6F73]">Note to Admin (Optional)</Label>
+                  <Label>Reason / Note (Optional)</Label>
                   <Input 
                     value={formData.note}
                     onChange={e => setFormData({...formData, note: e.target.value})}
-                    placeholder="Reason for assignment..."
-                    className="border-gray-200 h-11 rounded-xl"
+                    placeholder="E.g., Required for Q3 compliance"
                   />
                 </div>
-                <Button type="submit" className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white font-black h-12 mt-4 rounded-xl shadow-lg shadow-orange-100">
-                  Submit Request
-                </Button>
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                  <p className="text-xs text-blue-800 flex gap-2">
+                    <Clock className="w-4 h-4 shrink-0" />
+                    If due date is left blank, it will be automatically calculated based on course duration upon approval.
+                  </p>
+                </div>
+                <DialogFooter className="pt-4">
+                  <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
+                  <Button type="submit" className="bg-[#F26522] hover:bg-[#D54D10]" disabled={submitting}>
+                    {submitting ? "Assigning..." : "Assign Course"}
+                  </Button>
+                </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
@@ -172,77 +259,139 @@ export default function AssignmentsPage() {
       </div>
 
       <Card className="border-[#eee] shadow-sm bg-white overflow-hidden">
-        <CardHeader className="border-b border-[#eee] bg-gray-50/50 px-6 py-5">
-          <CardTitle className="text-lg font-bold flex items-center gap-2 text-[#111]">
-            <FileText className="w-5 h-5 text-[#F26522]" /> Assignment Requests
-          </CardTitle>
+        <CardHeader className="border-b border-[#eee] bg-white px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex gap-2">
+            {['All', 'Pending', 'Approved', 'Overdue', 'Rejected'].map(f => (
+              <Button
+                key={f}
+                variant={filter === f ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "text-xs font-bold h-8 rounded-full",
+                  filter === f ? "bg-gray-900 text-white hover:bg-gray-800 border-none" : "text-[#6A6F73] border-[#eee] hover:bg-gray-50"
+                )}
+              >
+                {f}
+              </Button>
+            ))}
+          </div>
         </CardHeader>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-[#eee] bg-white">
-                <th className="py-4 px-6 text-xs font-bold text-[#6A6F73] uppercase tracking-wider">Employee</th>
-                <th className="py-4 px-6 text-xs font-bold text-[#6A6F73] uppercase tracking-wider">Course</th>
-                <th className="py-4 px-6 text-xs font-bold text-[#6A6F73] uppercase tracking-wider">Due Date</th>
-                <th className="py-4 px-6 text-xs font-bold text-[#6A6F73] uppercase tracking-wider">Status</th>
-                {user?.role === 'admin' && <th className="py-4 px-6 text-xs font-bold text-[#6A6F73] uppercase tracking-wider text-right">Actions</th>}
+              <tr className="border-b border-[#eee] bg-gray-50/50">
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Employee</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Employee ID</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Course</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Requested By</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Requested Date</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Due Date</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Time Left</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Progress</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Status</th>
+                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#eee]">
-              {requests.map(req => (
-                <tr key={req.id} className="hover:bg-gray-50/80 transition-colors">
-                  <td className="py-4 px-6">
-                    <p className="text-sm font-bold text-[#111]">{req.user_name}</p>
-                    <p className="text-xs text-[#6A6F73]">{req.user_email}</p>
-                  </td>
-                  <td className="py-4 px-6">
-                    <p className="text-sm font-semibold text-[#111]">{req.course_title}</p>
-                    <p className="text-xs text-[#6A6F73] flex items-center gap-1 mt-0.5">
-                      <Clock className="w-3 h-3" /> Requested: {formatDate(req.created_at)}
-                    </p>
-                  </td>
-                  <td className="py-4 px-6">
-                    <div className="flex items-center gap-1.5 text-sm font-medium text-[#111]">
-                      <Calendar className="w-4 h-4 text-[#6A6F73]" />
-                      {formatDate(req.requested_due_date)}
-                    </div>
-                  </td>
-                  <td className="py-4 px-6">
-                    <Badge variant="outline" className={cn(
-                      "capitalize px-2.5 py-1 text-xs font-bold border",
-                      req.status === 'pending' ? "bg-amber-50 text-amber-600 border-amber-200" :
-                      req.status === 'approved' ? "bg-green-50 text-green-600 border-green-200" :
-                      "bg-red-50 text-red-600 border-red-200"
-                    )}>
-                      {req.status === 'pending' && <Clock className="w-3 h-3 mr-1 inline-block" />}
-                      {req.status === 'approved' && <CheckCircle2 className="w-3 h-3 mr-1 inline-block" />}
-                      {req.status === 'rejected' && <XCircle className="w-3 h-3 mr-1 inline-block" />}
-                      {req.status}
-                    </Badge>
-                  </td>
-                  {user?.role === 'admin' && (
-                    <td className="py-4 px-6 text-right">
-                      {req.status === 'pending' ? (
-                        <div className="flex items-center justify-end gap-2">
-                          <Button size="sm" onClick={() => handleApprove(req.id)} className="bg-green-500 hover:bg-green-600 text-white shadow-sm h-8 px-3 text-xs font-bold">
-                            <Check className="w-3.5 h-3.5 mr-1" /> Approve
-                          </Button>
-                          <Button size="sm" onClick={() => handleReject(req.id)} variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-8 px-3 text-xs font-bold">
-                            <X className="w-3.5 h-3.5 mr-1" /> Reject
-                          </Button>
+              {filteredRequests.map(req => {
+                const computedStatus = getComputedStatus(req);
+                const computedDueDate = getComputedDueDate(req);
+                const isOverdue = computedStatus === 'overdue';
+
+                return (
+                  <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="py-4 px-6">
+                      <p className="text-sm font-bold text-[#111]">{req.user_name}</p>
+                      <p className="text-xs text-[#6A6F73]">{req.user_email}</p>
+                    </td>
+                    <td className="py-4 px-6 text-sm text-[#111] font-medium">
+                      {req.employee_id || 'N/A'}
+                    </td>
+                    <td className="py-4 px-6">
+                      <p className="text-sm font-bold text-[#111]">{req.course_title}</p>
+                    </td>
+                    <td className="py-4 px-6">
+                      <p className="text-sm text-[#111] font-medium">{req.hr_name || 'System'}</p>
+                    </td>
+                    <td className="py-4 px-6">
+                      <p className="text-sm text-[#111] font-medium">{formatDate(req.created_at)}</p>
+                    </td>
+                    <td className="py-4 px-6">
+                      <p className={cn("text-sm font-medium", isOverdue ? "text-red-600 font-bold" : "text-[#111]")}>
+                        {computedDueDate ? formatDate(computedDueDate.toISOString()) : 'N/A'}
+                      </p>
+                    </td>
+                    <td className="py-4 px-6">
+                      <p className={cn("text-sm font-medium", isOverdue ? "text-red-600" : "text-[#111]")}>
+                        {getRemainingDays(req)}
+                      </p>
+                    </td>
+                    <td className="py-4 px-6">
+                      {req.status === 'approved' ? (
+                        <div className="w-24 space-y-1.5">
+                          <div className="flex justify-between text-xs font-bold text-[#111]">
+                            <span>{req.progress_percent || 0}%</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                            <div 
+                              className={cn("h-full rounded-full transition-all duration-500", (req.progress_percent || 0) === 100 ? "bg-green-500" : "bg-blue-600")}
+                              style={{ width: `${req.progress_percent || 0}%` }}
+                            />
+                          </div>
                         </div>
                       ) : (
-                        <span className="text-xs font-medium text-[#6A6F73]">Processed</span>
+                        <span className="text-xs text-[#6A6F73] italic">-</span>
                       )}
                     </td>
-                  )}
-                </tr>
-              ))}
-              {requests.length === 0 && !loading && (
+                    <td className="py-4 px-6">
+                      <div className="space-y-1">
+                        <Badge variant="outline" className={cn(
+                          "px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
+                          computedStatus === 'pending' ? "bg-amber-50 text-amber-700 border-amber-200" :
+                          computedStatus === 'approved' ? "bg-green-50 text-green-700 border-green-200" :
+                          computedStatus === 'overdue' ? "bg-red-50 text-red-700 border-red-200" :
+                          "bg-gray-100 text-gray-600 border-gray-200"
+                        )}>
+                          {computedStatus === 'pending' && <Clock className="w-3 h-3 mr-1 inline-block" />}
+                          {computedStatus === 'approved' && <CheckCircle2 className="w-3 h-3 mr-1 inline-block" />}
+                          {computedStatus === 'overdue' && <AlertCircle className="w-3 h-3 mr-1 inline-block" />}
+                          {computedStatus === 'rejected' && <XCircle className="w-3 h-3 mr-1 inline-block" />}
+                          {computedStatus}
+                        </Badge>
+                        {req.approval_timestamp && (
+                          <p className="text-[10px] text-[#6A6F73]" title={formatDateTime(req.approval_timestamp)}>
+                            Approved {formatDate(req.approval_timestamp)}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-4 px-6 text-right">
+                      {req.status === 'pending' && user?.role === 'admin' && (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button size="sm" onClick={() => handleApprove(req.id)} className="bg-green-500 hover:bg-green-600 text-white shadow-sm h-8 px-3 text-xs font-bold">
+                            Approve
+                          </Button>
+                          <Button size="sm" onClick={() => handleReject(req.id)} variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-8 px-3 text-xs font-bold">
+                            Reject
+                          </Button>
+                        </div>
+                      )}
+                      
+                      {req.status === 'pending' && user?.role === 'hr' && (
+                         <Button size="sm" onClick={() => handleCancel(req.id)} variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 h-8 px-3 text-xs font-bold">
+                           <Trash2 className="w-3.5 h-3.5 mr-1" /> Cancel
+                         </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredRequests.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={user?.role === 'admin' ? 5 : 4} className="py-12 text-center text-[#6A6F73]">
+                  <td colSpan={7} className="py-12 text-center text-[#6A6F73]">
                     <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm font-medium">No assignment requests found</p>
+                    <p className="text-sm font-medium">No assignments found for this filter</p>
                   </td>
                 </tr>
               )}

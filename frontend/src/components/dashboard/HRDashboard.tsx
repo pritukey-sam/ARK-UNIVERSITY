@@ -25,6 +25,7 @@ import {
   DialogFooter
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart as RePieChart, Pie, Cell 
@@ -44,7 +45,10 @@ export default function HRDashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [hrMembers, setHrMembers] = useState<any[]>([]);
-  const [formData, setFormData] = useState({ user_id: '', course_id: '', hr_id: '' });
+  const [formData, setFormData] = useState({ user_id: '', course_id: '', requested_due_date: '', note: '' });
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [addUserData, setAddUserData] = useState({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+  const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -86,18 +90,41 @@ export default function HRDashboard() {
 
   const handleNewAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.user_id || !formData.course_id || !formData.hr_id) return toast.error("Select all fields");
+    if (!formData.user_id || !formData.course_id) return toast.error("Please select an employee and course");
+    setSubmitting(true);
     try {
       await api.assignments.request({
         user_id: parseInt(formData.user_id),
         course_id: parseInt(formData.course_id),
-        hr_id: parseInt(formData.hr_id)
+        hr_id: user?.id,
+        requested_due_date: formData.requested_due_date ? new Date(formData.requested_due_date).toISOString() : undefined,
+        note: formData.note || undefined
       });
       toast.success("Assignment requested");
       setOpen(false);
-      setFormData({ user_id: '', course_id: '', hr_id: '' });
+      setFormData({ user_id: '', course_id: '', requested_due_date: '', note: '' });
       fetchData();
     } catch (e: any) { toast.error(e.message); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addUserData.name || !addUserData.email || !addUserData.password) {
+      return toast.error("Please fill in all required fields");
+    }
+    try {
+      setSubmitting(true);
+      await api.admin.createUser(addUserData);
+      toast.success("User successfully added to platform");
+      setIsAddUserOpen(false);
+      setAddUserData({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create user");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const safeSearch = (search || '').toLowerCase();
@@ -153,63 +180,88 @@ export default function HRDashboard() {
           <Button variant="outline" className="border-[#eee] bg-white shadow-sm" onClick={() => router.push('/users')}>
             <Users className="w-4 h-4 mr-2" /> View All Users
           </Button>
-          <Button variant="outline" className="border-[#eee] bg-white shadow-sm" onClick={() => router.push('/users')}>
-            <UserPlus className="w-4 h-4 mr-2" /> Add Employee
-          </Button>
+          
           
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white shadow-sm transition-all hover:scale-[1.02]">
-                <Plus className="w-4 h-4 mr-2" /> Assign Course
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px] bg-white">
+            <DialogTrigger
+              render={
+                <Button className="bg-[#F26522] hover:bg-[#D54D10] text-white shadow-sm transition-all hover:scale-[1.02]">
+                  <Plus className="w-4 h-4 mr-2" /> Assign Course
+                </Button>
+              }
+            />
+            <DialogContent className="sm:max-w-[450px]">
               <DialogHeader>
-                <DialogTitle>New Course Assignment</DialogTitle>
-                <DialogDescription>Assign a learning track to an employee.</DialogDescription>
+                <DialogTitle>Assign Course</DialogTitle>
+                <DialogDescription>Enroll a user into a specific course.</DialogDescription>
               </DialogHeader>
-              <form onSubmit={handleNewAssignment} className="space-y-4 pt-4">
+              <form onSubmit={handleNewAssignment} className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Employee</Label>
-                  <select 
-                    className="w-full h-10 px-3 rounded-md border border-[#eee] bg-white text-sm focus:border-[#F26522] outline-none"
-                    value={formData.user_id}
-                    onChange={e => setFormData({...formData, user_id: e.target.value})}
-                  >
-                    <option value="">Select an employee...</option>
-                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                  </select>
+                  <Label>Select User</Label>
+                  <Select value={formData.user_id} onValueChange={v => setFormData({...formData, user_id: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a learner...">
+                        {formData.user_id ? (() => {
+                          const u = users?.find(u => u.id.toString() === formData.user_id);
+                          return u ? `${u.name} (${u.email})` : undefined;
+                        })() : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users?.map(u => (
+                        <SelectItem key={u.id} value={u.id.toString()}>{u.name} ({u.email})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Course</Label>
-                  <select 
-                    className="w-full h-10 px-3 rounded-md border border-[#eee] bg-white text-sm focus:border-[#F26522] outline-none"
-                    value={formData.course_id}
-                    onChange={e => setFormData({...formData, course_id: e.target.value})}
-                  >
-                    <option value="">Select a course...</option>
-                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                  </select>
+                  <Label>Select Course</Label>
+                  <Select value={formData.course_id} onValueChange={v => setFormData({...formData, course_id: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a course...">
+                        {formData.course_id ? courses?.find(c => c.id.toString() === formData.course_id)?.title : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {courses?.map(c => (
+                        <SelectItem key={c.id} value={c.id.toString()}>{c.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Assigning HR</Label>
-                  <select 
-                    className="w-full h-10 px-3 rounded-md border border-[#eee] bg-white text-sm focus:border-[#F26522] outline-none"
-                    value={formData.hr_id}
-                    onChange={e => setFormData({...formData, hr_id: e.target.value})}
-                  >
-                    <option value="">Select your name...</option>
-                    {hrMembers.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-                  </select>
+                  <Label>Due Date (Optional)</Label>
+                  <Input 
+                    type="date"
+                    value={formData.requested_due_date}
+                    onChange={e => setFormData({...formData, requested_due_date: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Reason / Note (Optional)</Label>
+                  <Input 
+                    value={formData.note}
+                    onChange={e => setFormData({...formData, note: e.target.value})}
+                    placeholder="E.g., Required for Q3 compliance"
+                  />
+                </div>
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                  <p className="text-xs text-blue-800 flex gap-2">
+                    <Clock className="w-4 h-4 shrink-0" />
+                    If due date is left blank, it will be automatically calculated based on course duration upon approval.
+                  </p>
                 </div>
                 <DialogFooter className="pt-4">
-                  <Button type="submit" className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white font-bold" disabled={!formData.user_id || !formData.course_id || !formData.hr_id}>
-                    Assign Course
+                  <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button type="submit" className="bg-[#F26522] hover:bg-[#D54D10]" disabled={submitting}>
+                    {submitting ? "Assigning..." : "Assign Course"}
                   </Button>
                 </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
+
+
         </div>
       </div>
 
@@ -366,8 +418,8 @@ export default function HRDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 flex-1 flex flex-col justify-center">
-              <div style={{ width: '100%', height: 260 }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[260px] w-full min-h-[260px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={260}>
                   <RePieChart>
                     <Pie
                       data={[

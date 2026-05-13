@@ -277,15 +277,18 @@ class AssignmentRequest(Base):
     __tablename__ = "assignment_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     hr_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
-    status = Column(String(50), default="pending")  # pending, approved, rejected
+    status = Column(String(50), default="pending")  # pending, approved, rejected, cancelled
     requested_due_date = Column(DateTime(timezone=True), nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True) # Finalized due date
     note = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True) # Rejection reason or approval notes
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
     admin = relationship("User", foreign_keys=[admin_id])
     hr = relationship("User", foreign_keys=[hr_id])
@@ -303,3 +306,16 @@ class ActivityLog(Base):
     
     user = relationship("User")
     company = relationship("Company")
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    type = Column(String(50), nullable=True)
+    route = Column(String(255), nullable=True)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")

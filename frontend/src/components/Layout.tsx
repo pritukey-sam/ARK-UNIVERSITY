@@ -27,8 +27,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [pendingItems, setPendingItems] = useState<any[]>([]);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -44,8 +44,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const savedState = localStorage.getItem('sidebarCollapsed');
     if (savedState) setIsCollapsed(savedState === 'true');
 
+    let interval: any;
     if (user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'hr') {
-      fetchPending();
+      fetchNotifications();
+      interval = setInterval(fetchNotifications, 30000); // Poll every 30s
     }
     
     const handleClickOutside = (e: MouseEvent) => {
@@ -54,7 +56,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      if (interval) clearInterval(interval);
+    };
   }, [user]);
 
   const toggleSidebar = () => {
@@ -63,16 +68,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     localStorage.setItem('sidebarCollapsed', String(newState));
   };
 
-  const fetchPending = async () => {
+  const fetchNotifications = async () => {
     try {
-      let data: any[] = [];
-      if (user?.role === 'super_admin') {
-        data = await api.superAdmin.getRegistrationRequests();
-      } else if (user?.role === 'admin' || user?.role === 'hr') {
-        data = await api.assignments.getPending();
+      const data = await api.notifications.getAll();
+      setNotifications(data);
+      const countData = await api.notifications.getUnreadCount();
+      setUnreadCount(countData.unread_count);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleNotificationClick = async (notif: any) => {
+    try {
+      if (!notif.is_read) {
+        await api.notifications.markAsRead(notif.id);
+        setUnreadCount(prev => Math.max(0, prev - 1));
+        setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: true } : n));
       }
-      setPendingItems(data);
-      setPendingCount(data.length);
+      setNotifOpen(false);
+      if (notif.route) {
+        router.push(notif.route);
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -257,11 +272,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="relative" ref={notifRef}>
               <button 
                 onClick={() => setNotifOpen(!notifOpen)}
-                className="w-10 h-10 rounded-lg flex items-center justify-center text-[#6A6F73] hover:bg-gray-50 transition-colors"
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-[#6A6F73] hover:bg-gray-50 transition-colors relative"
               >
                 <Bell className="w-5 h-5" />
-                {pendingCount > 0 && (
-                  <span className="absolute top-2 right-2 w-2 h-2 bg-[#F26522] rounded-full border border-white" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-2 right-2 min-w-[16px] h-4 px-1 flex items-center justify-center bg-[#F26522] text-white text-[10px] font-bold rounded-full border border-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
                 )}
               </button>
               {notifOpen && (
@@ -270,16 +287,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     <p className="font-bold text-sm">Notifications</p>
                   </div>
                   <div className="max-h-64 overflow-y-auto">
-                    {pendingItems.length > 0 ? (
-                      pendingItems.map((item: any, i: number) => (
-                        <div key={i} className="p-4 border-b border-[#eee] last:border-0 hover:bg-gray-50 cursor-pointer"
-                          onClick={() => {
-                            setNotifOpen(false);
-                            if (user?.role === 'super_admin') router.push('/super-admin');
-                            else router.push('/dashboard');
-                          }}>
-                          <p className="text-sm font-bold text-[#111]">{item.company_name || item.user_name}</p>
-                          <p className="text-xs text-[#6A6F73] mt-1 line-clamp-1">Pending approval</p>
+                    {notifications.length > 0 ? (
+                      notifications.map((item: any, i: number) => (
+                        <div key={item.id} 
+                          className={cn(
+                            "p-4 border-b border-[#eee] last:border-0 hover:bg-gray-50 cursor-pointer transition-colors",
+                            !item.is_read && "bg-blue-50/30 hover:bg-blue-50/50"
+                          )}
+                          onClick={() => handleNotificationClick(item)}>
+                          <p className={cn("text-sm text-[#111]", !item.is_read && "font-bold")}>{item.title}</p>
+                          <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{item.message}</p>
+                          <p className="text-[10px] text-[#A1A7AF] mt-2">
+                            {new Date(item.created_at).toLocaleDateString()} {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
                         </div>
                       ))
                     ) : (

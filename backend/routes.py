@@ -136,9 +136,17 @@ from dependencies import get_current_company_id
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
 @router.post("/create-user")
-def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr", "super_admin"]))):
     try:
         company_id = current_user.get("company_id")
+        
+        # Validation for HR role
+        if current_user["role"] == "hr" and body.role != "employee":
+            raise HTTPException(status_code=403, detail="HR can only create employee accounts.")
+            
+        # Validation for Admin role
+        if current_user["role"] == "admin" and body.role == "super_admin":
+            raise HTTPException(status_code=403, detail="Admin cannot create super_admin accounts.")
         
         # Duplicate email check
         existing = db.query(User).filter(User.email == body.email).first()
@@ -219,30 +227,29 @@ def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(
     
     # ROLE VISIBILITY FILTERING
     if current_user["role"] == "admin":
-        # Admin can see HR, employees, and other admins, but NOT super_admin
         query = query.filter(User.role != "super_admin")
     elif current_user["role"] == "hr":
-        # HR can only see employees
         query = query.filter(User.role == "employee")
     
     users = query.all()
     results = []
     for u in users:
-        # Get latest enrollment
-        latest_enrollment = db.query(Enrollment).options(joinedload(Enrollment.course)).filter(
+        # Get all enrollments for this user
+        enrollments = db.query(Enrollment).options(joinedload(Enrollment.course)).filter(
             Enrollment.user_id == u.id
-        ).order_by(Enrollment.enrolled_at.desc()).first()
+        ).all()
+        
+        assigned_courses = [e.course.title for e in enrollments if e.course and e.is_active]
+        
+        # Sort by enrolled_at to find the latest
+        latest_enrollment = None
+        if enrollments:
+            latest_enrollment = max(enrollments, key=lambda e: e.enrolled_at if e.enrolled_at else datetime.min.replace(tzinfo=timezone.utc))
         
         # Get active courses count
-        active_courses_count = db.query(Enrollment).filter(
-            Enrollment.user_id == u.id,
-            Enrollment.is_active == True,
-            Enrollment.is_completed == False
-        ).count()
+        active_courses_count = len([e for e in enrollments if e.is_active and not e.is_completed])
         
         # Get who joined them (Joined By)
-        # Search for User Created action for this user in ActivityLog
-        # details format: "Created new user: {user.name} ({user.email})"
         joined_by_log = db.query(ActivityLog).filter(
             ActivityLog.action == "User Created",
             ActivityLog.details.like(f"%{u.email}%")
@@ -265,6 +272,7 @@ def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(
             "employee_id": u.employee_id,
             "created_at": u.created_at,
             "avatar_initials": u.avatar_initials,
+            "assigned_courses": assigned_courses,
             "latest_course": latest_enrollment.course.title if latest_enrollment and latest_enrollment.course else "Not Assigned",
             "assigned_at": latest_enrollment.enrolled_at if latest_enrollment else None
         })
@@ -455,7 +463,7 @@ def get_user_details(user_id: int, db: Session = Depends(get_db), current_user=D
     }
 
 @router.post("/assign-course")
-def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr"]))):
+def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "super_admin"]))):
     company_id = current_user.get("company_id")
     query = db.query(User).filter(User.id == body.employee_id)
     if company_id:
@@ -808,6 +816,7 @@ def get_activity_feed(db: Session = Depends(get_db), current_user=Depends(get_cu
 
 # ── Helper for Access Expiry ──────────────────────────────────────────────────
 def check_course_access(db: Session, user_id: int, course_id: int):
+    # Check ANY enrollment record — consistent with /my-courses which also has no is_active filter
     enrollment = db.query(Enrollment).filter(
         Enrollment.user_id == user_id,
         Enrollment.course_id == course_id
@@ -817,19 +826,22 @@ def check_course_access(db: Session, user_id: int, course_id: int):
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
         
     if enrollment.is_completed:
-        return True # Completed courses never expire
-        
+        return True  # Completed courses never expire
+
+    # Only enforce expiry if course has a due_date set AND it's past due
+    # (Don't block if due_date comes from completion_duration_days calc, only from explicit db field)
     if enrollment.due_date:
         due = enrollment.due_date
         if due.tzinfo is None:
             due = due.replace(tzinfo=timezone.utc)
-            
-        if due < datetime.now(timezone.utc):
+        # Give a 3-day grace period to avoid false locks  
+        if due < datetime.now(timezone.utc) - timedelta(days=3):
             raise HTTPException(
                 status_code=403, 
-                detail="Course Access Expired. Please contact administrator."
+                detail="Course access has expired. Please contact your administrator."
             )
     return True
+
 
 # ── Modules ───────────────────────────────────────────────────────────────────
 
@@ -857,7 +869,7 @@ def get_modules(course_id: int, db: Session = Depends(get_db), current_user=Depe
             results.append({
                 "id": m.id, "course_id": m.course_id, "title": m.title,
                 "description": m.description, "order": m.order,
-                "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "description": v.description} for v in m.videos],
+                "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "description": v.description, "duration_seconds": v.duration_seconds} for v in m.videos],
                 "notes": [{"id": n.id, "file_url": n.file_url, "file_type": n.file_type} for n in m.notes],
                 "assignments": [{"id": a.id, "title": a.title, "file_url": a.file_url} for a in m.assignments],
                 "quizzes": [{"id": q.id, "title": q.title} for q in m.quizzes]

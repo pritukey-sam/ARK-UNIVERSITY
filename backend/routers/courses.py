@@ -178,6 +178,33 @@ def get_courses(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── CHECK COURSE ACCESS (for frontend enrollment validation) ──────────────
+@router.get("/{course_id}/check-access")
+def check_course_access_endpoint(course_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Returns enrollment status. 200 = has access, 403 = no access."""
+    user_id = current_user["id"]
+    role = current_user.get("role", "employee")
+
+    # Admins always have access
+    if role in ["admin", "super_admin", "hr"]:
+        return {"enrolled": True, "role": role}
+
+    # Check enrollment (any enrollment record = access)
+    enrollment = db.query(Enrollment).filter(
+        Enrollment.user_id == user_id,
+        Enrollment.course_id == course_id
+    ).first()
+
+    if not enrollment:
+        raise HTTPException(status_code=403, detail="Not enrolled in this course")
+
+    return {
+        "enrolled": True,
+        "is_completed": enrollment.is_completed,
+        "enrolled_at": enrollment.enrolled_at
+    }
+
+
 # ── GET SIGNED VIDEO URL ───────────────────────────────────────────────────
 @router.get("/video-url/{video_id}")
 def get_video_url(video_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -196,15 +223,15 @@ def get_video_url(video_id: int, db: Session = Depends(get_db), current_user=Dep
         raise HTTPException(status_code=404, detail="Module not found")
         
     course = db.query(Course).filter(Course.id == module.course_id).first()
-    if course.company_id != company_id and role != "super_admin":
+    # Company check: allow if same company OR super_admin OR no company set
+    if company_id and course.company_id and course.company_id != company_id and role != "super_admin":
         raise HTTPException(status_code=403, detail="Module does not belong to your company")
 
-    # Verify enrollment if employee
+    # Verify enrollment if employee — check ANY enrollment (not just is_active)
     if role == "employee":
         enrollment = db.query(Enrollment).filter(
             Enrollment.user_id == user_id, 
-            Enrollment.course_id == module.course_id, 
-            Enrollment.is_active == True
+            Enrollment.course_id == module.course_id
         ).first()
         if not enrollment:
             raise HTTPException(status_code=403, detail="Not enrolled in this course")

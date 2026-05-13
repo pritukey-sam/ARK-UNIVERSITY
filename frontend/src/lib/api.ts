@@ -107,6 +107,7 @@ export const api = {
  getModuleProgressDetail: (courseId: number, moduleId: number) => api.request(`/progress/module/${courseId}/${moduleId}`),
  updateVideoProgress: (data: { video_id: number, watched_seconds: number }) => api.request(`/progress/video`, { method: 'POST', body: JSON.stringify(data) }),
  getVideoUrl: (videoId: number) => api.request(`/courses/video-url/${videoId}`),
+ checkAccess: (courseId: number) => api.request(`/courses/${courseId}/check-access`),
  },
 
  common: {
@@ -154,11 +155,19 @@ export const api = {
  getAll: () => api.request('/assignments/all'),
  approve: (requestId: number) => api.request(`/assignments/${requestId}/approve`, { method: 'POST' }),
  reject: (requestId: number) => api.request(`/assignments/${requestId}/reject`, { method: 'POST' }),
+ cancel: (requestId: number) => api.request(`/assignments/${requestId}/cancel`, { method: 'DELETE' }),
  getCount: () => api.request('/assignments/count'),
  },
 
  payment: {
  fake: () => api.post('/payment/fake', {}),
+ },
+
+ notifications: {
+ getAll: () => api.get('/notifications'),
+ getUnreadCount: () => api.get('/notifications/unread-count'),
+ markAsRead: (id: number) => api.post(`/notifications/${id}/read`, {}),
+ markAllRead: () => api.post('/notifications/mark-all-read', {}),
  },
 
 };

@@ -64,8 +64,7 @@ export default function AdminDashboard() {
     title: '',
     description: '',
     thumbnail_url: '',
-    completion_duration_days: 30,
-    category: 'General'
+    completion_duration_days: 30
   });
 
   const [userForm, setUserForm] = useState({
@@ -124,7 +123,7 @@ export default function AdminDashboard() {
       await api.admin.createCourse(courseForm);
       toast.success("Course created successfully!");
       setIsCourseModalOpen(false);
-      setCourseForm({ title: '', description: '', thumbnail_url: '', completion_duration_days: 30, category: 'General' });
+      setCourseForm({ title: '', description: '', thumbnail_url: '', completion_duration_days: 30 });
       fetchAll();
     } catch (error: any) {
       toast.error(error.message || "Failed to create course");
@@ -337,7 +336,12 @@ export default function AdminDashboard() {
                   <Label>Select User</Label>
                   <Select value={assignForm.employee_id} onValueChange={v => setAssignForm({...assignForm, employee_id: v})}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Choose a learner..." />
+                      <SelectValue placeholder="Choose a learner...">
+                        {assignForm.employee_id ? (() => {
+                          const u = allUsers?.find(u => u.id.toString() === assignForm.employee_id);
+                          return u ? `${u.name} (${u.email})` : undefined;
+                        })() : undefined}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {allUsers?.map(u => (
@@ -350,7 +354,9 @@ export default function AdminDashboard() {
                   <Label>Select Course</Label>
                   <Select value={assignForm.course_id} onValueChange={v => setAssignForm({...assignForm, course_id: v})}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Choose a course..." />
+                      <SelectValue placeholder="Choose a course...">
+                        {assignForm.course_id ? courses?.find(c => c.id.toString() === assignForm.course_id)?.title : undefined}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {courses?.map(c => (
@@ -364,7 +370,9 @@ export default function AdminDashboard() {
                     <Label>Choose HR</Label>
                     <Select value={assignForm.assigned_by} onValueChange={v => setAssignForm({...assignForm, assigned_by: v})}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select HR..." />
+                        <SelectValue placeholder="Select HR...">
+                          {assignForm.assigned_by || undefined}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {allUsers?.filter(u => u.role === 'hr').map(u => (
@@ -462,7 +470,7 @@ export default function AdminDashboard() {
             </CardHeader>
             <CardContent className="p-6">
               <div className="h-[350px] w-full min-h-[350px]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={300}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={300}>
                   <AreaChart data={analytics?.userGrowth || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
@@ -491,7 +499,7 @@ export default function AdminDashboard() {
               </CardHeader>
               <CardContent className="p-6">
                 <div className="h-[250px] w-full min-h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={200}>
                     <BarChart data={analytics?.completionRate?.slice(0, 5) || []}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                       <XAxis dataKey="title" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6A6F73'}} />
@@ -519,7 +527,7 @@ export default function AdminDashboard() {
                   return (
                     <>
                       <div className="h-[200px] w-full min-h-[200px]">
-                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={180}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={180}>
                           <RePieChart>
                             <Pie
                               data={hasData ? roleData : [{ name: 'No Data', value: 1 }]}

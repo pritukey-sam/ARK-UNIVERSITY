@@ -68,6 +68,10 @@ def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials
             finally:
                 db.close()
                 
+        # Lowercase the role for consistency in downstream checks
+        if "role" in payload:
+            payload["role"] = str(payload["role"]).lower()
+            
         return payload
     except HTTPException:
         raise
@@ -78,7 +82,9 @@ def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials
 
 def require_roles(allowed_roles: list):
     def checker(user=Depends(get_current_user)):
-        if user.get("role") not in allowed_roles:
+        user_role = str(user.get("role", "")).lower()
+        allowed_lower = [str(r).lower() for r in allowed_roles]
+        if user_role not in allowed_lower:
             raise HTTPException(status_code=403, detail="Permission denied: insufficient role privileges")
         return user
     return checker

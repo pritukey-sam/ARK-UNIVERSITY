@@ -327,20 +327,44 @@ class AssignmentRequestCreate(BaseModel):
 
 class AssignmentRequestOut(BaseModel):
     id: int
-    admin_id: int
+    admin_id: Optional[int] = None
     hr_id: int
     user_id: int
     course_id: int
     status: str
     requested_due_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
     note: Optional[str] = None
-    created_at: datetime
+    reason: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
     
     # Optional fields for UI convenience
     admin_name: Optional[str] = None
     user_name: Optional[str] = None
     user_email: Optional[str] = None
     course_title: Optional[str] = None
+    hr_name: Optional[str] = None
+    progress_percent: Optional[int] = None
+    approval_timestamp: Optional[datetime] = None
+    completion_duration_days: Optional[int] = None
+    employee_id: Optional[str] = None
 
     class Config:
-        from_attributes = True
+        from_attributes = True
+
+class NotificationOut(BaseModel):
+    id: int
+    title: str
+    message: str
+    type: Optional[str] = None
+    route: Optional[str] = None
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NotificationCount(BaseModel):
+    unread_count: int

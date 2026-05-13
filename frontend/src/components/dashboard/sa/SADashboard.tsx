@@ -108,7 +108,7 @@ export default function SADashboardPage() {
               <TrendingUp className="w-5 h-5 text-[#F26522]" />
             </CardHeader>
             <div className="h-80 w-full min-h-[320px]">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={320}>
                 <AreaChart data={growthData}>
                   <defs>
                     <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">

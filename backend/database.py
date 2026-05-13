@@ -39,7 +39,7 @@ def create_tables():
     try:
         from models import (User, Course, Module, Enrollment, UserProgress,
                             Video, Notes, Assignment, Quiz, Question,
-                            QuizAttempt, Submission, UserVideoProgress, AssignmentRequest, ActivityLog)
+                            QuizAttempt, Submission, UserVideoProgress, AssignmentRequest, ActivityLog, Notification)
         Base.metadata.create_all(bind=engine)
         
         # Manual migration for duration_seconds
@@ -176,11 +176,29 @@ def create_tables():
                     conn.commit()
                 print("Added requested_due_date column to assignment_requests table")
                 
-            if 'note' not in ar_columns:
+            if 'reason' not in ar_columns:
                 with engine.connect() as conn:
-                    conn.execute(text("ALTER TABLE assignment_requests ADD COLUMN note TEXT"))
+                    conn.execute(text("ALTER TABLE assignment_requests ADD COLUMN reason TEXT"))
                     conn.commit()
-                print("Added note column to assignment_requests table")
+                print("Added reason column to assignment_requests table")
+                
+            if 'due_date' not in ar_columns:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE assignment_requests ADD COLUMN due_date TIMESTAMP WITH TIME ZONE"))
+                    conn.commit()
+                print("Added due_date column to assignment_requests table")
+            
+            if 'approved_at' not in ar_columns:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE assignment_requests ADD COLUMN approved_at TIMESTAMP WITH TIME ZONE"))
+                    conn.commit()
+                print("Added approved_at column to assignment_requests table")
+
+            # SAFETY: Ensure admin_id is nullable (fix for NotNullViolation)
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE assignment_requests ALTER COLUMN admin_id DROP NOT NULL"))
+                conn.commit()
+                print("Ensured admin_id is nullable in assignment_requests table")
 
         print("Database tables verified/created")
     except Exception as e:

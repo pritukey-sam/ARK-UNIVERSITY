@@ -56,7 +56,7 @@ export default function SAAnalyticsPage() {
           <p className="text-sm text-[#6A6F73]">Monthly recurring revenue trend</p>
         </CardHeader>
         <div className="h-80 w-full min-h-[320px]">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={320}>
             <AreaChart data={growthData}>
               <defs>
                 <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
@@ -80,8 +80,8 @@ export default function SAAnalyticsPage() {
           <CardHeader className="p-0 mb-6">
             <CardTitle className="text-lg">User Growth</CardTitle>
           </CardHeader>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-80 w-full min-h-[320px]">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={320}>
               <LineChart data={growthData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" />
@@ -97,8 +97,8 @@ export default function SAAnalyticsPage() {
           <CardHeader className="p-0 mb-6">
             <CardTitle className="text-lg">Company Growth</CardTitle>
           </CardHeader>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-80 w-full min-h-[320px]">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={320}>
               <BarChart data={growthData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" />
