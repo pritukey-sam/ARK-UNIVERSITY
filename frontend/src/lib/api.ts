@@ -11,14 +11,13 @@ export const api = {
  headers['Content-Type'] = 'application/json';
  }
  const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
- const text = await response.text();
- let data;
- try {
- data = text ? JSON.parse(text) : {};
- } catch (e) {
- console.error('API Response Parse Error. Status:', response.status, 'Body:', text);
- data = { error: `Failed to parse response (Status ${response.status})` };
- }
+  const text = await response.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    data = { detail: text || `Server Error (${response.status})` };
+  }
  if (!response.ok) {
  if (response.status === 402) {
  window.location.href = '/payment';
@@ -105,7 +104,8 @@ export const api = {
  getCourseProgress: (courseId: number) => api.request(`/progress/course/${courseId}`),
  updateDetailedProgress: (data: { course_id: number, module_id: number, video_watched?: boolean, notes_viewed?: boolean, assignment_submitted?: boolean, quiz_completed?: boolean, last_video_timestamp?: number, last_tab?: string }) => api.request('/progress/update', { method: 'PATCH', body: JSON.stringify(data) }),
  getModuleProgressDetail: (courseId: number, moduleId: number) => api.request(`/progress/module/${courseId}/${moduleId}`),
- updateVideoProgress: (data: { video_id: number, watched_seconds: number }) => api.request(`/progress/video`, { method: 'POST', body: JSON.stringify(data) }),
+ updateVideoProgress: (data: { video_id: number, watched_seconds?: number, completed?: boolean, module_id?: number }) => api.request(`/progress/video`, { method: 'POST', body: JSON.stringify(data) }),
+ markNotesComplete: (data: { module_id: number, completed: boolean }) => api.request(`/progress/notes`, { method: 'POST', body: JSON.stringify(data) }),
  getVideoUrl: (videoId: number) => api.request(`/courses/video-url/${videoId}`),
  checkAccess: (courseId: number) => api.request(`/courses/${courseId}/check-access`),
  },

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, use, useRef, Suspense } from 'react';
 import { api } from '@/lib/api';
+import BackNavigation from '@/components/common/BackNavigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
@@ -188,22 +189,15 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
  {/* 1. CLEAN REFINED HEADER */}
  <header className="h-16 border-b border-gray-200 bg-white flex items-center px-6 sticky top-0 z-[100] shadow-sm">
  <div className="flex items-center gap-6 w-full max-w-7xl mx-auto">
- <Button 
- variant="ghost" 
- size="sm" 
- onClick={() => router.push(`/courses/${id}/modules/${moduleId}/manage`)}
- className="text-gray-500 hover:text-[#111] hover:bg-gray-100 rounded-lg font-bold text-[11px] uppercase tracking-wider gap-2 px-3"
- >
- <ArrowLeft className="w-4 h-4" /> Exit Preview
- </Button>
+ <BackNavigation />
 
- <div className="h-4 w-px bg-gray-200" />
 
- <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-wider overflow-hidden">
- <span className="truncate max-w-[200px]">{course?.title}</span>
- <ChevronRight className="w-3 h-3 opacity-30 shrink-0" />
- <span className="text-[#111] truncate">{module.title}</span>
- </div>
+
+
+
+
+
+
 
  <div className="flex-1" />
 

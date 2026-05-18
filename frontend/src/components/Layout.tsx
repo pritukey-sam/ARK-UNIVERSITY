@@ -15,7 +15,6 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import BackButton from '@/components/common/BackButton';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -232,7 +231,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {isCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
             </Button>
 
-            <BackButton />
           </div>
 
           <div className="flex-1 max-w-md mx-4">
@@ -247,7 +245,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 className="w-full bg-gray-50/50 border border-[#eee] rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-[#F26522] transition-colors"
               />
               {searchOpen && (
-                <div className="absolute top-full mt-1 left-0 w-full bg-white border border-[#eee] rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="absolute top-full mt-1 left-0 w-full bg-white border border-[#eee] rounded-lg shadow-lg z-[200] overflow-hidden">
                   {searchLoading ? (
                     <div className="p-4 text-center text-sm text-[#6A6F73]">Searching...</div>
                   ) : searchResults?.courses.length > 0 ? (
@@ -282,7 +280,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 )}
               </button>
               {notifOpen && (
-                <div className="absolute top-full mt-1 right-0 w-80 bg-white border border-[#eee] rounded-lg shadow-lg z-50">
+                <div className="absolute top-full mt-1 right-0 w-80 bg-white border border-[#eee] rounded-lg shadow-lg z-[200]">
                   <div className="p-4 border-b border-[#eee]">
                     <p className="font-bold text-sm">Notifications</p>
                   </div>
@@ -318,7 +316,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <ChevronDown className={cn("w-4 h-4 text-[#6A6F73] transition-transform", profileOpen && "rotate-180")} />
               </button>
               {profileOpen && (
-                <div className="absolute top-full mt-1 right-0 w-48 bg-white border border-[#eee] rounded-lg shadow-lg z-50 py-1">
+                <div className="absolute top-full mt-1 right-0 w-48 bg-white border border-[#eee] rounded-lg shadow-lg z-[200] py-1">
                   <button onClick={() => router.push('/profile')} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-[#6A6F73]">Profile</button>
                   <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm hover:bg-red-50 text-red-600 border-t border-[#eee]">Sign Out</button>
                 </div>

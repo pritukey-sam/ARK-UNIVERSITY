@@ -28,7 +28,7 @@ class LoginRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     email: str
-    password: str
+    password: Optional[str] = None
     name: str
     role: str
     department: Optional[str] = "Engineering"
@@ -163,9 +163,13 @@ def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_
         # Generate ID
         emp_id = generate_user_id(db, company_id, body.role)
         
+        # Password auto-generation: First name (capitalized) + 123
+        first_name = body.name.split()[0] if body.name.strip() else "User"
+        generated_password = first_name.capitalize() + "123"
+        
         user = User(
             email=body.email,
-            password_hash=hash_password(body.password),
+            password_hash=hash_password(generated_password),
             name=body.name,
             role=body.role,
             avatar_initials=initials,
@@ -174,6 +178,15 @@ def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_
             department=body.department or "Engineering"
         )
         db.add(user)
+        
+        # Log Activity
+        db.add(ActivityLog(
+            company_id=company_id,
+            user_id=current_user["id"],
+            action="User Created",
+            details=f"Added new {body.role}: {body.name} ({body.email})"
+        ))
+        
         db.commit()
         db.refresh(user)
         return user
@@ -193,6 +206,15 @@ def create_course(body: CreateCourseRequest, db: Session = Depends(get_db), curr
     )
     print(f"DEBUG: Creating course with duration: {course.completion_duration_days}")
     db.add(course)
+    
+    # Log Activity
+    db.add(ActivityLog(
+        company_id=current_user.get("company_id"),
+        user_id=current_user["id"],
+        action="Course Created",
+        details=f"Created new course: '{course.title}'"
+    ))
+    
     db.commit()
     db.refresh(course)
     return course
@@ -212,7 +234,14 @@ def update_course(course_id: int, body: CourseUpdate, db: Session = Depends(get_
     if body.completion_duration_days is not None: 
         course.completion_duration_days = body.completion_duration_days
     
-    print(f"DEBUG: Updating course {course_id} - New duration: {course.completion_duration_days}")
+    # Log Activity
+    db.add(ActivityLog(
+        company_id=company_id,
+        user_id=current_user["id"],
+        action="Course Updated",
+        details=f"Updated course settings: '{course.title}'"
+    ))
+    
     db.commit()
     db.refresh(course)
     return course
@@ -326,6 +355,14 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), c
     if body.department: user.department = body.department
     if body.employee_id: user.employee_id = body.employee_id
     if body.is_active is not None: user.is_active = body.is_active
+    
+    # Log Activity
+    db.add(ActivityLog(
+        company_id=company_id,
+        user_id=current_user["id"],
+        action="User Updated",
+        details=f"Updated profile for: {user.name} ({user.email})"
+    ))
     
     db.commit()
     return {"message": "User updated successfully"}
@@ -492,7 +529,17 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
     if existing:
         # Re-assigning updates the due date (extensions) and ensures it is active
         existing.is_active = True
-        existing.due_date = datetime.now(timezone.utc) + timedelta(days=course.completion_duration_days)
+        new_due = datetime.now(timezone.utc) + timedelta(days=course.completion_duration_days)
+        existing.due_date = new_due
+        
+        # Log Extension
+        db.add(ActivityLog(
+            company_id=company_id,
+            user_id=current_user["id"],
+            action="Course Extension",
+            details=f"Extended deadline for '{course.title}' (User: {user.name})"
+        ))
+        
         db.commit()
         return {"message": f"Deadline for '{course.title}' extended to {existing.due_date.strftime('%d %b %Y')}"}
 
@@ -615,50 +662,56 @@ def my_courses(db: Session = Depends(get_db), current_user=Depends(require_roles
     ).all()
     
     results = []
-    for e in enrollments:
-        c = e.course
-        total_modules = db.query(Module).filter(Module.course_id == c.id).count()
-        completed_modules = db.query(UserProgress).filter(
-            UserProgress.user_id == current_user["id"],
-            UserProgress.course_id == c.id,
-            UserProgress.is_completed == True
-        ).count()
-        
-        status = "in_progress"
-        if total_modules > 0 and completed_modules >= total_modules:
-            status = "completed"
+    try:
+        for e in enrollments:
+            c = e.course
+            if not c: continue
             
-        total_duration = db.query(func.sum(Video.duration_seconds)).select_from(Module).join(Video).filter(Module.course_id == c.id).scalar() or 0
-        
-        # Due date calculations (Dynamic)
-        due_date = e.enrolled_at + timedelta(days=c.completion_duration_days) if e.enrolled_at and c.completion_duration_days else None
-        now = datetime.now(timezone.utc)
-        remaining_days = None
-        is_expired = False
-        
-        if due_date:
-            due_compare = due_date
-            if due_compare.tzinfo is None:
-                due_compare = due_compare.replace(tzinfo=timezone.utc)
-            remaining_days = (due_compare - now).days
-            if due_compare < now and status != "completed":
-                is_expired = True
+            total_modules = db.query(Module).filter(Module.course_id == c.id).count()
+            completed_modules = db.query(UserProgress).filter(
+                UserProgress.user_id == current_user["id"],
+                UserProgress.course_id == c.id,
+                UserProgress.is_completed == True
+            ).count()
+            
+            status = "in_progress"
+            if total_modules > 0 and completed_modules >= total_modules:
+                status = "completed"
+                
+            total_duration = db.query(func.sum(Video.duration_seconds)).select_from(Module).join(Video).filter(Module.course_id == c.id).scalar() or 0
+            
+            # Due date calculations (Dynamic)
+            completion_days = c.completion_duration_days or 30
+            due_date = e.enrolled_at + timedelta(days=completion_days) if e.enrolled_at else None
+            now = datetime.now(timezone.utc)
+            remaining_days = None
+            is_expired = False
+            
+            if due_date:
+                due_compare = due_date
+                if due_compare.tzinfo is None:
+                    due_compare = due_compare.replace(tzinfo=timezone.utc)
+                remaining_days = (due_compare - now).days
+                if due_compare < now and status != "completed":
+                    is_expired = True
 
-        results.append({
-            "id": c.id,
-            "title": c.title,
-            "description": c.description,
-            "thumbnail_url": c.thumbnail_url,
-            "assigned_at": e.enrolled_at,
-            "due_date": due_date,
-            "remaining_days": remaining_days,
-            "is_expired": is_expired,
-            "status": "expired" if is_expired else status,
-            "completed_modules": completed_modules,
-            "total_modules": total_modules,
-            "total_duration_seconds": total_duration,
-            "completion_duration_days": c.completion_duration_days
-        })
+            results.append({
+                "id": c.id,
+                "title": c.title,
+                "description": c.description,
+                "thumbnail_url": c.thumbnail_url,
+                "assigned_at": e.enrolled_at,
+                "due_date": due_date,
+                "remaining_days": remaining_days,
+                "is_expired": is_expired,
+                "status": "expired" if is_expired else status,
+                "completed_modules": completed_modules,
+                "total_modules": total_modules,
+                "total_duration_seconds": int(total_duration),
+                "completion_duration_days": completion_days
+            })
+    except Exception as e:
+        print(f"Error in my_courses: {e}")
     return results
 
 @router.post("/complete-course/{course_id}")
@@ -699,116 +752,104 @@ def get_stats(db: Session = Depends(get_db), current_user=Depends(get_current_us
         company_id = current_user.get("company_id")
         stats = {}
         
-        if role == "admin":
-            stats["totalUsers"] = db.query(User).filter(User.company_id == company_id, User.role != "super_admin").count()
-            stats["totalCourses"] = db.query(Course).filter(Course.company_id == company_id).count()
-            stats["totalAssignments"] = db.query(Enrollment).join(Course).filter(Course.company_id == company_id).count()
-            stats["totalSubmissions"] = db.query(Submission).join(User).filter(User.company_id == company_id).count()
-            stats["totalQuizAttempts"] = db.query(QuizAttempt).join(User).filter(User.company_id == company_id).count()
-            
-            # Expiry metrics (Dynamic Calculation)
-            now = datetime.now(timezone.utc)
-            all_active = db.query(Enrollment, Course).join(Course).filter(
-                Course.company_id == company_id,
-                Enrollment.is_completed == False
-            ).all()
-            
-            overdue = 0
-            near_expiry = 0
-            for e, c in all_active:
-                if e.enrolled_at and c.completion_duration_days:
-                    due = e.enrolled_at + timedelta(days=c.completion_duration_days)
-                    if due.tzinfo is None: due = due.replace(tzinfo=timezone.utc)
-                    if due < now:
-                        overdue += 1
-                    elif now <= due <= now + timedelta(days=3):
-                        near_expiry += 1
-            
-            stats["overdueAssignments"] = overdue
-            stats["nearExpiryAssignments"] = near_expiry
-            
-            # Count total completed enrollments for the company
-            stats["completedAssignments"] = db.query(Enrollment).join(Course).filter(
-                Course.company_id == company_id,
-                Enrollment.is_completed == True
-            ).count()
-        elif role == "hr":
-            stats["totalEmployees"] = db.query(User).filter(User.company_id == company_id, User.role == 'employee').count()
-            stats["activeAssignments"] = db.query(Enrollment).join(Course).filter(Course.company_id == company_id).count()
-            
-            # Correctly count completed enrollments
-            stats["completedAssignments"] = db.query(Enrollment).join(Course).filter(
-                Course.company_id == company_id,
-                Enrollment.is_completed == True
-            ).count()
-            
-            stats["totalSubmissions"] = db.query(Submission).join(User).filter(User.company_id == company_id).count()
-        else:
+        if role == "employee":
             uid = current_user["id"]
-            stats["myCourses"] = db.query(Enrollment).filter(Enrollment.user_id == uid).count()
-            stats["completedCourses"] = db.query(UserProgress).filter(
-                UserProgress.user_id == uid,
-                UserProgress.is_completed == True
-            ).distinct(UserProgress.course_id).count()
-            stats["pendingCourses"] = max(0, (stats["myCourses"] or 0) - (stats["completedCourses"] or 0))
-            stats["quizzesTaken"] = db.query(QuizAttempt).filter(QuizAttempt.user_id == uid).count()
-            stats["submissionsMade"] = db.query(Submission).filter(Submission.user_id == uid).count()
+            total_enrolled = db.query(Enrollment).filter(Enrollment.user_id == uid).count()
+            completed = db.query(Enrollment).filter(Enrollment.user_id == uid, Enrollment.is_completed == True).count()
             avg = db.query(func.avg(QuizAttempt.score)).filter(QuizAttempt.user_id == uid).scalar()
-            stats["avgQuizScore"] = round(float(avg or 0), 1)
+            
+            stats = {
+                "totalEnrolled": total_enrolled,
+                "completedCourses": completed,
+                "inProgress": max(0, total_enrolled - completed),
+                "quizzesTaken": db.query(QuizAttempt).filter(QuizAttempt.user_id == uid).count(),
+                "avgQuizScore": round(float(avg or 0), 1)
+            }
+        elif role in ["admin", "hr", "super_admin"]:
+            user_q = db.query(User).filter(User.is_active == True)
+            course_q = db.query(Course).filter(Course.is_active == True)
+            enrollment_q = db.query(Enrollment).join(User, Enrollment.user_id == User.id).filter(User.is_active == True)
+            
+            if company_id:
+                user_q = user_q.filter(User.company_id == company_id)
+                course_q = course_q.filter(Course.company_id == company_id)
+                enrollment_q = enrollment_q.filter(User.company_id == company_id)
+            
+            now = datetime.now(timezone.utc)
+            
+            total_users = user_q.count()
+            total_courses = course_q.count()
+            total_enrollments = enrollment_q.count()
+            
+            completed = enrollment_q.filter(Enrollment.is_completed == True).count()
+            overdue = enrollment_q.filter(Enrollment.is_completed == False, Enrollment.due_date < now).count()
+            near_expiry = enrollment_q.filter(
+                Enrollment.is_completed == False, 
+                Enrollment.due_date >= now, 
+                Enrollment.due_date <= now + timedelta(days=7)
+            ).count()
+            
+            stats = {
+                "totalUsers": total_users,
+                "totalCourses": total_courses,
+                "totalEnrollments": total_enrollments,
+                "totalAssignments": total_enrollments, # Alias for frontend compatibility
+                "completedAssignments": completed,
+                "overdueAssignments": overdue,
+                "nearExpiryAssignments": near_expiry
+            }
         return stats
     except Exception as e:
         print(f"Stats Error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to load dashboard statistics.")
+        return {"totalEnrolled": 0, "completedCourses": 0, "inProgress": 0}
 
 
 @router.get("/dashboard/activity")
 def get_activity_feed(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     try:
-        role = current_user["role"]
         company_id = current_user.get("company_id")
+        
+        # Pull directly from ActivityLog for the most accurate and inclusive feed
+        query = db.query(ActivityLog).options(joinedload(ActivityLog.user))
+        if company_id:
+            query = query.filter(ActivityLog.company_id == company_id)
+            
+        logs = query.order_by(ActivityLog.created_at.desc()).limit(15).all()
+        
+        icon_map = {
+            "User Created": "user",
+            "User Updated": "user",
+            "User Deleted": "user-x",
+            "Course Created": "plus-circle",
+            "Course Updated": "edit",
+            "Course Assigned": "book-open",
+            "Course Extension": "calendar",
+            "Module Completed": "check-circle",
+            "Course Completed": "award",
+            "Video Completed": "play-circle",
+            "Notes Viewed": "file-text",
+            "Assignment Submitted": "upload-cloud",
+            "Quiz Attempted": "target"
+        }
+        
         activities = []
-
-        if role == "admin":
-            users = db.query(User).filter(User.company_id == company_id, User.role != "super_admin").order_by(User.created_at.desc()).limit(5).all()
-            for u in users:
-                activities.append({"type": "user_registered", "message": f"{u.name} joined as {u.role}", "time": u.created_at, "icon": "user"})
-
-            enrolls = db.query(Enrollment).join(User).filter(User.company_id == company_id).options(joinedload(Enrollment.user), joinedload(Enrollment.course)).order_by(Enrollment.enrolled_at.desc()).limit(5).all()
-            for e in enrolls:
-                if e.user and e.course:
-                    activities.append({"type": "course_assigned", "message": f"{e.user.name} assigned to '{e.course.title}'", "time": e.enrolled_at, "icon": "book"})
-
-            subs = db.query(Submission).join(User).filter(User.company_id == company_id).options(joinedload(Submission.user)).order_by(Submission.submitted_at.desc()).limit(5).all()
-            for s in subs:
-                if s.user:
-                    activities.append({"type": "submission", "message": f"{s.user.name} submitted an assignment", "time": s.submitted_at, "icon": "upload"})
-
-            quizzes = db.query(QuizAttempt).join(User).filter(User.company_id == company_id).options(joinedload(QuizAttempt.user)).order_by(QuizAttempt.attempted_at.desc()).limit(5).all()
-            for q in quizzes:
-                if q.user:
-                    activities.append({"type": "quiz_attempt", "message": f"{q.user.name} scored {q.score}% on a quiz", "time": q.attempted_at, "icon": "trophy"})
-
-        elif role == "hr":
-            enrolls = db.query(Enrollment).join(User).filter(User.company_id == company_id).options(joinedload(Enrollment.user), joinedload(Enrollment.course)).order_by(Enrollment.enrolled_at.desc()).limit(12).all()
-            for e in enrolls:
-                if e.user and e.course:
-                    activities.append({"type": "course_assigned", "message": f"{e.user.name} assigned to '{e.course.title}'", "time": e.enrolled_at, "icon": "book"})
-
-        else:
-            uid = current_user["id"]
-            subs = db.query(Submission).options(joinedload(Submission.module)).filter(Submission.user_id == uid).order_by(Submission.submitted_at.desc()).limit(5).all()
-            for s in subs:
-                if s.module:
-                    activities.append({"type": "submission", "message": f"You submitted '{s.module.title}'", "time": s.submitted_at, "icon": "upload"})
-
-            quizzes = db.query(QuizAttempt).join(Quiz).filter(QuizAttempt.user_id == uid).order_by(QuizAttempt.attempted_at.desc()).limit(5).all()
-            for q in quizzes:
-                 activities.append({"type": "quiz_attempt", "message": f"Scored {q.score}% on a quiz", "time": q.attempted_at, "icon": "trophy"})
-
-        activities.sort(key=lambda x: x["time"] if x["time"] else datetime(1970, 1, 1, tzinfo=timezone.utc), reverse=True)
-        return activities[:12]
+        for l in logs:
+            name = l.user.name if l.user else "System"
+            activities.append({
+                "type": l.action.lower().replace(" ", "_"),
+                "message": f"{name}: {l.details}" if l.details else f"{name} performed {l.action}",
+                "time": l.created_at,
+                "icon": icon_map.get(l.action, "activity")
+            })
+            
+        # Fallback to old logic only if no logs exist (legacy support)
+        if not activities:
+             # (Self-contained minimal fallback)
+             users = db.query(User).filter(User.company_id == company_id).order_by(User.created_at.desc()).limit(5).all()
+             for u in users:
+                 activities.append({"type": "user_registered", "message": f"{u.name} joined", "time": u.created_at, "icon": "user"})
+        
+        return activities
     except Exception as e:
         print(f"Activity Feed Error: {e}")
         return []
@@ -1122,6 +1163,15 @@ async def bulk_preview_quiz(
             # Explanation
             explanation = str(row['explanation']).strip() if 'explanation' in row and not pd.isna(row['explanation']) else None
 
+            # Resolve index to actual text for MCQs if it's a number
+            if q_type == 'mcq' and not error:
+                if correct.isdigit():
+                    idx = int(correct) - 1 # Convert 1-based Excel to 0-based Array
+                    if 0 <= idx < len(options):
+                        correct = options[idx]
+                    else:
+                        error = f"Invalid option index {correct}. Must be between 1 and {len(options)}"
+
             preview_data.append({
                 "question_text": q_text,
                 "type": q_type,
@@ -1277,6 +1327,14 @@ def get_quiz(quiz_id: int, db: Session = Depends(get_db), current_user=Depends(g
     quiz = db.query(Quiz).filter(Quiz.id == quiz_id).options(joinedload(Quiz.questions)).first()
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
+    # Ensure questions are unique
+    seen_q_ids = set()
+    unique_questions = []
+    for q in quiz.questions:
+        if q.id not in seen_q_ids:
+            unique_questions.append(q)
+            seen_q_ids.add(q.id)
+
     quiz_data = {"id": quiz.id, "title": quiz.title, "questions": [
         {
             "id": q.id, 
@@ -1284,10 +1342,10 @@ def get_quiz(quiz_id: int, db: Session = Depends(get_db), current_user=Depends(g
             "question_text": q.question_text, 
             "options": q.options,
             "marks": q.marks
-        } for q in quiz.questions
+        } for q in unique_questions
     ]}
     if current_user["role"] == "admin":
-        for i, q in enumerate(quiz.questions):
+        for i, q in enumerate(unique_questions):
             quiz_data["questions"][i]["correct_answer"] = q.correct_answer
             quiz_data["questions"][i]["explanation"] = q.explanation
     return quiz_data
@@ -1306,20 +1364,58 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
     for ans in body.answers:
         if ans.question_id in question_map:
             q = question_map[ans.question_id]
+            # Robust normalization function
+            def normalize_text(val):
+                if val is None: return ""
+                import re
+                # Convert to string, lowercase, and trim
+                s = str(val).lower().strip()
+                # Collapse multiple spaces into one
+                s = re.sub(r'\s+', ' ', s)
+                return s
+
+            norm_user = normalize_text(ans.answer)
+            norm_correct = normalize_text(q.correct_answer)
             is_correct = False
-            
-            # Validation logic based on type
+
+            # Evaluation logic
             if q.type == "mcq":
-                is_correct = str(q.correct_answer).strip() == str(ans.answer).strip()
-            elif q.type in ["fill", "short"]:
-                is_correct = str(q.correct_answer).strip().lower() == str(ans.answer).strip().lower()
-            elif q.type == "code":
-                # Basic string match for now
-                is_correct = str(q.correct_answer).strip() == str(ans.answer).strip()
+                # 1. Direct match (Text or Index)
+                if norm_user == norm_correct:
+                    is_correct = True
+                else:
+                    # 2. Try index-to-text resolution
+                    try:
+                        import json
+                        options_list = json.loads(q.options) if q.options else []
+                        
+                        # Case A: Correct answer is index (e.g. "2"), User sent text (e.g. "Option B")
+                        # Note: Excel imports use 1-based indexing
+                        if norm_correct.isdigit():
+                            idx = int(norm_correct) - 1 # Fix: Use 1-based indexing from Excel
+                            if 0 <= idx < len(options_list):
+                                if normalize_text(options_list[idx]) == norm_user:
+                                    is_correct = True
+                        
+                        # Case B: Correct answer is text (e.g. "Option B"), User sent index (e.g. "2")
+                        if not is_correct and norm_user.isdigit():
+                            idx = int(norm_user) - 1 # Fix: Maintain consistency with 1-based indexing
+                            if 0 <= idx < len(options_list):
+                                if normalize_text(options_list[idx]) == norm_correct:
+                                    is_correct = True
+                    except:
+                        pass
+            else:
+                # fill_blank, short, text, etc.
+                is_correct = (norm_user == norm_correct)
             
+            # DEBUG LOG
+            print(f"[QUIZ DEBUG] QID: {q.id} | User: '{ans.answer}' (norm: '{norm_user}') | Correct: '{q.correct_answer}' (norm: '{norm_correct}') | Type: {q.type} | Match: {is_correct}")
+
             if is_correct:
                 earned_marks += (q.marks if q.marks is not None else 1)
             
+            # Avoid duplicate entries in result map if the same question is sent twice
             user_answers_map[ans.question_id] = {
                 "answer": ans.answer,
                 "is_correct": is_correct,
@@ -1395,28 +1491,60 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
             
             if progress:
                 progress.quiz_completed = True
-                if progress.video_watched and progress.notes_viewed:
-                    if not progress.is_completed:
-                        progress.is_completed = True
-                        progress.completed_at = datetime.now(timezone.utc)
-                        # Log Module Completion
-                        db.add(ActivityLog(
-                            company_id=current_user.get("company_id"),
-                            user_id=current_user["id"],
-                            action="Module Completed",
-                            details=f"Successfully finished all requirements for module ID: {module_id}"
-                        ))
+                # Check for all pillars
+                has_notes = db.query(Notes).filter(Notes.module_id == module_id).first() is not None
+                has_assignment = db.query(Assignment).filter(Assignment.module_id == module_id).first() is not None
+                
+                p1 = bool(progress.video_watched)
+                p2 = bool(progress.notes_viewed) if has_notes else True
+                p3 = bool(progress.assignment_submitted) if has_assignment else True
+                p4 = True # Quiz just passed
+                
+                if p1 and p2 and p3 and p4 and not progress.is_completed:
+                    progress.is_completed = True
+                    progress.completed_at = datetime.now(timezone.utc)
+                    db.add(ActivityLog(
+                        company_id=current_user.get("company_id"),
+                        user_id=current_user["id"],
+                        action="Module Completed",
+                        details=f"Successfully finished all requirements for module ID: {module_id}"
+                    ))
             else:
                 mod = db.query(Module).filter(Module.id == module_id).first()
-                new_progress = UserProgress(
+                progress = UserProgress(
                     user_id=current_user["id"],
                     module_id=module_id,
                     course_id=mod.course_id if mod else 0,
                     quiz_completed=True
                 )
-                db.add(new_progress)
+                db.add(progress)
             
             db.commit()
+
+            # ── SYNC WITH COURSE ENROLLMENT ─────────────────────────────────────
+            if progress.is_completed:
+                total_modules = db.query(Module).filter(Module.course_id == progress.course_id, Module.is_active == True).count()
+                completed_modules = db.query(UserProgress).filter(
+                    UserProgress.user_id == current_user["id"],
+                    UserProgress.course_id == progress.course_id,
+                    UserProgress.is_completed == True
+                ).count()
+                
+                if total_modules > 0 and completed_modules >= total_modules:
+                    enrollment = db.query(Enrollment).filter(
+                        Enrollment.user_id == current_user["id"],
+                        Enrollment.course_id == progress.course_id
+                    ).first()
+                    if enrollment and not enrollment.is_completed:
+                        enrollment.is_completed = True
+                        enrollment.completed_at = datetime.now(timezone.utc)
+                        db.add(ActivityLog(
+                            company_id=current_user.get("company_id"),
+                            user_id=current_user["id"],
+                            action="Course Completed",
+                            details=f"Finished all modules in course ID: {progress.course_id}"
+                        ))
+                        db.commit()
         except Exception as e:
             print(f"Warning: Progress sync failed: {e}")
             db.rollback()
@@ -1429,6 +1557,7 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
         "status": attempt.status,
         "attempt_number": attempt.attempt_number,
         "attempted_at": attempt.attempted_at,
+        "time_taken": attempt.time_taken,
         "results": user_answers_map
     }
 
@@ -1436,8 +1565,9 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
 
 @router.post("/modules/{module_id}/submit")
 async def submit_assignment(module_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["employee", "admin"]))):
-    if not file.filename.endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Only ZIP files are allowed")
+    allowed_extensions = [".zip", ".rar", ".7z", ".pdf", ".doc", ".docx", ".txt", ".ppt", ".pptx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"]
+    if not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a standard document, image, or archive.")
     
     # Local File Upload
     file_url = save_file_locally(file, folder="submissions")
@@ -1447,7 +1577,79 @@ async def submit_assignment(module_id: int, file: UploadFile = File(...), db: Se
     new_submission = Submission(user_id=current_user["id"], module_id=module_id, file_url=file_url)
     db.add(new_submission)
     
+    # Update Progress
+    progress = db.query(UserProgress).filter(
+        UserProgress.user_id == current_user["id"],
+        UserProgress.module_id == module_id
+    ).first()
+    
+    if not progress:
+        mod = db.query(Module).filter(Module.id == module_id).first()
+        progress = UserProgress(
+            user_id=current_user["id"],
+            module_id=module_id,
+            course_id=mod.course_id if mod else 0,
+            assignment_submitted=True
+        )
+        db.add(progress)
+    else:
+        progress.assignment_submitted = True
+    
     # Log Activity
+    db.add(ActivityLog(
+        company_id=current_user.get("company_id"),
+        user_id=current_user["id"],
+        action="Assignment Submitted",
+        details=f"Uploaded assignment for module ID: {module_id}"
+    ))
+    
+    # Check for all pillars
+    has_notes = db.query(Notes).filter(Notes.module_id == module_id).first() is not None
+    has_quiz = db.query(Quiz).filter(Quiz.module_id == module_id).first() is not None
+    
+    p1 = bool(progress.video_watched)
+    p2 = bool(progress.notes_viewed) if has_notes else True
+    p3 = True # Assignment just submitted
+    p4 = bool(progress.quiz_completed) if has_quiz else True
+    
+    if p1 and p2 and p3 and p4 and not progress.is_completed:
+        progress.is_completed = True
+        progress.completed_at = datetime.now(timezone.utc)
+        db.add(ActivityLog(
+            company_id=current_user.get("company_id"),
+            user_id=current_user["id"],
+            action="Module Completed",
+            details=f"Successfully finished all requirements for module ID: {module_id}"
+        ))
+
+    db.commit()
+
+    # ── SYNC WITH COURSE ENROLLMENT ─────────────────────────────────────
+    if progress.is_completed:
+        total_modules = db.query(Module).filter(Module.course_id == progress.course_id, Module.is_active == True).count()
+        completed_modules = db.query(UserProgress).filter(
+            UserProgress.user_id == current_user["id"],
+            UserProgress.course_id == progress.course_id,
+            UserProgress.is_completed == True
+        ).count()
+        
+        if total_modules > 0 and completed_modules >= total_modules:
+            enrollment = db.query(Enrollment).filter(
+                Enrollment.user_id == current_user["id"],
+                Enrollment.course_id == progress.course_id
+            ).first()
+            if enrollment and not enrollment.is_completed:
+                enrollment.is_completed = True
+                enrollment.completed_at = datetime.now(timezone.utc)
+                db.add(ActivityLog(
+                    company_id=current_user.get("company_id"),
+                    user_id=current_user["id"],
+                    action="Course Completed",
+                    details=f"Finished all modules in course ID: {progress.course_id}"
+                ))
+                db.commit()
+
+    # Log Activity for submission
     log = ActivityLog(
         company_id=current_user.get("company_id"),
         user_id=current_user["id"],
@@ -1455,6 +1657,7 @@ async def submit_assignment(module_id: int, file: UploadFile = File(...), db: Se
         details=f"Uploaded solution for module ID: {module_id}"
     )
     db.add(log)
+    db.commit()
     
     db.commit()
     db.refresh(new_submission)

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, use } from 'react';
 import { api } from '@/lib/api';
+import BackNavigation from '@/components/common/BackNavigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -86,12 +87,8 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
       {/* ── HERO BANNER ── */}
       <div className="bg-white border-b border-[#eee]">
         <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-          {/* Breadcrumb */}
-          <nav className="flex items-center gap-2 text-sm text-[#6A6F73]">
-            <Link href="/courses" className="hover:text-[#F26522] transition-colors">Courses</Link>
-            <ChevronRight className="w-3.5 h-3.5" />
-            <span className="text-[#111] font-medium truncate max-w-[300px]">{course.title}</span>
-          </nav>
+          {/* Back Navigation */}
+          <BackNavigation />
 
           <div className="flex flex-col lg:flex-row gap-8">
             {/* Left: Info */}
@@ -180,7 +177,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                   ) : (
                     <Button
                       className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
-                      onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}` : `#`)}
+                      onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}/preview` : `#`)}
                       disabled={!course.modules || course.modules.length === 0}
                     >
                       Preview Course <ArrowRight className="w-4 h-4 ml-2" />
@@ -314,7 +311,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                       <CardContent className="p-0">
                         <div
                           className="p-5 flex items-center justify-between gap-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                          onClick={() => router.push(`/courses/${id}/modules/${module.id}/manage`)}
+                          onClick={() => router.push(`/courses/${id}/modules/${module.id}/preview`)}
                         >
                           <div className="flex items-center gap-4 flex-1 min-w-0">
                             <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 bg-white text-[#6A6F73] border border-[#eee]">

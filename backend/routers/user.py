@@ -12,6 +12,8 @@ router = APIRouter(prefix="/account", tags=["User"])
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
+    phone: Optional[str] = None
+    country_code: Optional[str] = None
     password: Optional[str] = None
 
 @router.get("/profile")
@@ -36,7 +38,9 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(get_current_
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "updated_at": user.updated_at.isoformat() if user.updated_at else None,
             "plan_type": company.plan_type if company else "free",
-            "avatar_url": user.avatar_url
+            "avatar_url": user.avatar_url,
+            "phone": user.phone,
+            "country_code": user.country_code
         }
     except Exception as e:
         print(f"ERROR IN GET_PROFILE: {str(e)}")
@@ -52,10 +56,16 @@ def update_profile(body: ProfileUpdate, db: Session = Depends(get_db), current_u
     
     if body.name: user.name = body.name
     if body.email: 
-        existing = db.query(User).filter(User.email == body.email, User.id != user.id).first()
+        normalized_email = body.email.strip().lower()
+        if not normalized_email:
+            raise HTTPException(status_code=400, detail="Email cannot be empty")
+            
+        existing = db.query(User).filter(User.email == normalized_email, User.id != user.id).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Email already in use")
-        user.email = body.email
+            raise HTTPException(status_code=400, detail="Email already in use by another account")
+        user.email = normalized_email
+    if body.phone is not None: user.phone = body.phone
+    if body.country_code is not None: user.country_code = body.country_code
     if body.password:
         user.password_hash = hash_password(body.password)
         

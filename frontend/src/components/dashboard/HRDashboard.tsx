@@ -47,7 +47,7 @@ export default function HRDashboard() {
   const [hrMembers, setHrMembers] = useState<any[]>([]);
   const [formData, setFormData] = useState({ user_id: '', course_id: '', requested_due_date: '', note: '' });
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
-  const [addUserData, setAddUserData] = useState({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+  const [addUserData, setAddUserData] = useState({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
   const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -110,7 +110,7 @@ export default function HRDashboard() {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addUserData.name || !addUserData.email || !addUserData.password) {
+    if (!addUserData.name || !addUserData.email) {
       return toast.error("Please fill in all required fields");
     }
     try {
@@ -118,7 +118,7 @@ export default function HRDashboard() {
       await api.admin.createUser(addUserData);
       toast.success("User successfully added to platform");
       setIsAddUserOpen(false);
-      setAddUserData({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+      setAddUserData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
       fetchData();
     } catch (error: any) {
       toast.error(error.message || "Failed to create user");
@@ -151,10 +151,7 @@ export default function HRDashboard() {
   const kpis = [
     { label: 'Total Employees', value: users.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Active Courses', value: courses.length, icon: BookOpen, color: 'text-[#F26522]', bg: 'bg-orange-50' },
-    { label: 'Completed Trainings', value: analytics?.stats?.totalCompletions || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'Pending / In Progress', value: assigned.filter(a => a.status === 'in-progress').length + pending.length, icon: Clock, color: 'text-purple-600', bg: 'bg-purple-50' },
     { label: 'Overdue Trainings', value: overdueTrainings.length, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50' },
-    { label: 'Completion Rate', value: `${analytics?.stats?.completionRate || 0}%`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
   return (
@@ -164,7 +161,7 @@ export default function HRDashboard() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <LayoutDashboard className="w-5 h-5 text-[#F26522]" />
-            <h1 className="text-3xl font-extrabold text-[#111] tracking-tight">HR Management Dashboard</h1>
+            <h1 className="text-3xl font-bold text-[#111] tracking-tight">HR Management Dashboard</h1>
           </div>
           <div className="flex items-center gap-3 text-[#6A6F73]">
             <span className="text-sm font-medium">Track workforce progress and manage learning paths</span>

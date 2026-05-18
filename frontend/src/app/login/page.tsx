@@ -101,11 +101,6 @@ export default function LoginPage() {
  )}
  </Button>
 
- <div className="text-center pt-4 border-t border-[#eee]">
- <p className="text-sm text-[#6A6F73]">
- New company? <Link href="/register-company" className="text-[#F26522] font-bold hover:underline">Register now</Link>
- </p>
- </div>
  </form>
  </CardContent>
  </Card>

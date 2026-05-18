@@ -15,6 +15,71 @@ import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+const COUNTRIES = [
+  { name: 'India', code: '+91', flag: '🇮🇳' },
+  { name: 'United States', code: '+1', flag: '🇺🇸' },
+  { name: 'United Kingdom', code: '+44', flag: '🇬🇧' },
+  { name: 'United Arab Emirates', code: '+971', flag: '🇦🇪' },
+  { name: 'Singapore', code: '+65', flag: '🇸🇬' },
+  { name: 'Australia', code: '+61', flag: '🇦🇺' },
+  { name: 'Saudi Arabia', code: '+966', flag: '🇸🇦' },
+  { name: 'Canada', code: '+1', flag: '🇨🇦' },
+  { name: 'Germany', code: '+49', flag: '🇩🇪' },
+  { name: 'France', code: '+33', flag: '🇫🇷' },
+  { name: 'Japan', code: '+81', flag: '🇯🇵' },
+  { name: 'China', code: '+86', flag: '🇨🇳' },
+  { name: 'Brazil', code: '+55', flag: '🇧🇷' },
+  { name: 'South Africa', code: '+27', flag: '🇿🇦' },
+  { name: 'Russia', code: '+7', flag: '🇷🇺' },
+  { name: 'Mexico', code: '+52', flag: '🇲🇽' },
+  { name: 'Italy', code: '+39', flag: '🇮🇹' },
+  { name: 'South Korea', code: '+82', flag: '🇰🇷' },
+  { name: 'Spain', code: '+34', flag: '🇪🇸' },
+  { name: 'Netherlands', code: '+31', flag: '🇳🇱' },
+  { name: 'Switzerland', code: '+41', flag: '🇨🇭' },
+  { name: 'Sweden', code: '+46', flag: '🇸🇪' },
+  { name: 'Norway', code: '+47', flag: '🇳🇴' },
+  { name: 'Denmark', code: '+45', flag: '🇩🇰' },
+  { name: 'Finland', code: '+358', flag: '🇫🇮' },
+  { name: 'Ireland', code: '+353', flag: '🇮🇪' },
+  { name: 'New Zealand', code: '+64', flag: '🇳🇿' },
+  { name: 'Belgium', code: '+32', flag: '🇧🇪' },
+  { name: 'Austria', code: '+43', flag: '🇦Ｔ' },
+  { name: 'Portugal', code: '+351', flag: '🇵Ｔ' },
+  { name: 'Greece', code: '+30', flag: '🇬Ｒ' },
+  { name: 'Turkey', code: '+90', flag: 'ＴＲ' },
+  { name: 'Israel', code: '+972', flag: 'ＩＬ' },
+  { name: 'Hong Kong', code: '+852', flag: 'ＨＫ' },
+  { name: 'Malaysia', code: '+60', flag: 'ＭＹ' },
+  { name: 'Thailand', code: '+66', flag: 'ＴＨ' },
+  { name: 'Indonesia', code: '+62', flag: 'ＩＤ' },
+  { name: 'Philippines', code: '+63', flag: 'ＰＨ' },
+  { name: 'Vietnam', code: '+84', flag: 'ＶＮ' },
+  { name: 'Pakistan', code: '+92', flag: 'ＰＫ' },
+  { name: 'Bangladesh', code: '+880', flag: 'ＢＤ' },
+  { name: 'Nigeria', code: '+234', flag: 'ＮＧ' },
+  { name: 'Egypt', code: '+20', flag: 'ＥＧ' },
+  { name: 'Argentina', code: '+54', flag: 'ＡＲ' },
+  { name: 'Colombia', code: '+57', flag: 'ＣＯ' },
+  { name: 'Chile', code: '+56', flag: 'ＣＬ' },
+  { name: 'Peru', code: '+51', flag: 'ＰＥ' },
+  { name: 'Poland', code: '+48', flag: 'ＰＬ' },
+  { name: 'Ukraine', code: '+380', flag: 'ＵＡ' },
+  { name: 'Czech Republic', code: '+420', flag: 'ＣＺ' },
+  { name: 'Hungary', code: '+36', flag: 'ＨＵ' },
+  { name: 'Romania', code: '+40', flag: 'ＲＯ' },
+].sort((a, b) => a.name.localeCompare(b.name));
+// Add more countries or use a library in production.
+// For this task, I'll provide a significant list.
 
 export default function SettingsPage() {
   const { user, updateUser } = useAuth();
@@ -71,6 +136,7 @@ export default function SettingsPage() {
     name: '',
     email: '',
     phone: '',
+    countryCode: '+91',
   });
 
   useEffect(() => {
@@ -78,7 +144,8 @@ export default function SettingsPage() {
       setProfileData({
         name: user.name || '',
         email: user.email || '',
-        phone: '', // Optional
+        phone: user.phone || '',
+        countryCode: user.country_code || '+91',
       });
     }
   }, [user]);
@@ -86,17 +153,36 @@ export default function SettingsPage() {
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    
+    // Proper Email Validation
+    const trimmedEmail = profileData.email.trim();
+    if (!trimmedEmail) {
+      return toast.error('Email address is required');
+    }
+
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      return toast.error('Please enter a valid email address (e.g. name@example.com)');
+    }
+
     setLoading(true);
     try {
-      // Use existing admin update API if possible, fallback to a standard PUT
-      try {
-        await api.admin.updateUser(user.id, { name: profileData.name });
-      } catch {
-        await api.request(`/users/${user.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ name: profileData.name })
-        });
-      }
+      await api.common.updateProfile({ 
+        name: profileData.name,
+        email: trimmedEmail,
+        phone: profileData.phone,
+        country_code: profileData.countryCode
+      });
+      
+      // Update local context to reflect changes everywhere
+      updateUser({ 
+        ...user, 
+        name: profileData.name,
+        email: trimmedEmail.toLowerCase(),
+        phone: profileData.phone,
+        country_code: profileData.countryCode
+      });
+      
       toast.success('Profile settings updated successfully');
     } catch (error: any) {
       toast.error(error.message || 'Failed to update profile');
@@ -290,19 +376,45 @@ export default function SettingsPage() {
                       <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Email Address</Label>
                       <Input 
                         value={profileData.email} 
-                        className="border-gray-200 h-11 rounded-xl bg-gray-50 text-gray-500" 
-                        disabled 
+                        onChange={e => setProfileData({...profileData, email: e.target.value})} 
+                        className="border-gray-200 h-11 rounded-xl" 
+                        required
+                        type="email"
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Phone Number (Optional)</Label>
-                    <Input 
-                      value={profileData.phone} 
-                      onChange={e => setProfileData({...profileData, phone: e.target.value})} 
-                      placeholder="+1 (555) 000-0000"
-                      className="border-gray-200 h-11 rounded-xl max-w-md" 
-                    />
+                    <div className="flex gap-2 max-w-md">
+                      <Select 
+                        value={profileData.countryCode} 
+                        onValueChange={v => setProfileData({...profileData, countryCode: v})}
+                      >
+                        <SelectTrigger className="w-[140px] h-11 rounded-xl border-gray-200 font-bold">
+                          <SelectValue placeholder="Code" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl border-gray-100 shadow-xl max-h-[300px]">
+                          <ScrollArea className="h-full">
+                            {COUNTRIES.map((country) => (
+                              <SelectItem 
+                                key={`${country.name}-${country.code}`} 
+                                value={country.code} 
+                                className="text-xs font-medium cursor-pointer"
+                              >
+                                <span className="mr-2">{country.flag}</span>
+                                {country.name} ({country.code})
+                              </SelectItem>
+                            ))}
+                          </ScrollArea>
+                        </SelectContent>
+                      </Select>
+                      <Input 
+                        value={profileData.phone} 
+                        onChange={e => setProfileData({...profileData, phone: e.target.value})} 
+                        placeholder="555 000-0000"
+                        className="flex-1 border-gray-200 h-11 rounded-xl" 
+                      />
+                    </div>
                   </div>
 
                   <div className="flex justify-end pt-4">

@@ -70,7 +70,6 @@ export default function AdminDashboard() {
   const [userForm, setUserForm] = useState({
     name: '',
     email: '',
-    password: '',
     role: 'employee',
     department: 'Engineering'
   });
@@ -84,11 +83,28 @@ export default function AdminDashboard() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // Comparison States
+  const [comparisonMode, setComparisonMode] = useState<'monthly' | 'daily'>('monthly');
+  const [monthA, setMonthA] = useState('');
+  const [monthB, setMonthB] = useState('');
+  const [dayA, setDayA] = useState(new Date().toISOString().split('T')[0]);
+  const [dayB, setDayB] = useState(new Date().toISOString().split('T')[0]);
+
   useEffect(() => {
     setMounted(true);
     fetchAll();
+    
+    // Auto-refresh every 30 seconds to keep data live as requested
+    const refreshInterval = setInterval(() => {
+      fetchAll();
+    }, 30000);
+
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
-    return () => clearInterval(timer);
+    
+    return () => {
+      clearInterval(refreshInterval);
+      clearInterval(timer);
+    };
   }, []);
 
   const fetchAll = async () => {
@@ -114,6 +130,16 @@ export default function AdminDashboard() {
     }
   };
 
+  // Sync comparison months when analytics data arrives
+  useEffect(() => {
+    if (analytics?.userGrowth?.length >= 2 && !monthA && !monthB) {
+      setMonthA(analytics.userGrowth[analytics.userGrowth.length - 2].month);
+      setMonthB(analytics.userGrowth[analytics.userGrowth.length - 1].month);
+    } else if (analytics?.userGrowth?.length === 1 && !monthB) {
+      setMonthB(analytics.userGrowth[0].month);
+    }
+  }, [analytics, monthA, monthB]);
+
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseForm.title || !courseForm.description) return toast.error("Please fill required fields");
@@ -134,14 +160,14 @@ export default function AdminDashboard() {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userForm.name || !userForm.email || !userForm.password) return toast.error("Please fill required fields");
+    if (!userForm.name || !userForm.email) return toast.error("Please fill required fields");
     
     setSubmitting(true);
     try {
       await api.admin.createUser(userForm);
       toast.success("User added successfully!");
       setIsUserModalOpen(false);
-      setUserForm({ name: '', email: '', password: '', role: 'employee', department: 'Engineering' });
+      setUserForm({ name: '', email: '', role: 'employee', department: 'Engineering' });
       fetchAll();
     } catch (error: any) {
       toast.error(error.message || "Failed to add user");
@@ -191,18 +217,12 @@ export default function AdminDashboard() {
   if (!mounted) return null;
 
   const kpis = [
-    { label: 'Total Users', value: stats?.totalUsers || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: '+12% this month' },
+    { label: 'Total Users', value: allUsers?.filter(u => u.role === 'employee').length || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: '+12% this month' },
     { label: 'Total Courses', value: stats?.totalCourses || 0, icon: BookOpen, color: 'text-[#F26522]', bg: 'bg-orange-50', trend: '+4 new courses' },
     { label: 'Total Enrollments', value: stats?.totalAssignments || 0, icon: Activity, color: 'text-purple-600', bg: 'bg-purple-50', trend: '85% engagement' },
     { label: 'Completions', value: stats?.completedAssignments || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50', trend: '92% success rate' },
   ];
 
-  const secondaryKpis = [
-    { label: 'Total Employees', value: allUsers?.filter(u => u.role === 'employee').length || 0, icon: UserCheck },
-    { label: 'Total HRs', value: allUsers?.filter(u => u.role === 'hr').length || 0, icon: ShieldCheck },
-    { label: 'Expiring Soon', value: stats?.nearExpiryAssignments || 0, icon: Clock },
-    { label: 'Overdue', value: stats?.overdueAssignments || 0, icon: AlertCircle },
-  ];
 
   const COLORS = ['#F26522', '#3B82F6', '#10B981', '#8B5CF6', '#F59E0B'];
 
@@ -289,10 +309,6 @@ export default function AdminDashboard() {
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address <span className="text-red-500">*</span></Label>
                   <Input id="email" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} placeholder="john@company.com" required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pass">Password <span className="text-red-500">*</span></Label>
-                  <Input id="pass" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} placeholder="Minimum 6 characters" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role">Role</Label>
@@ -428,67 +444,212 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Secondary Stats Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {secondaryKpis.map((k, i) => (
-          <div key={i} className="bg-white p-4 rounded-xl border border-[#eee] flex items-center gap-4 shadow-sm">
-            <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-[#6A6F73]">
-              <k.icon className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-[#6A6F73] uppercase">{k.label}</p>
-              <p className="text-lg font-bold text-[#111]">{k.value}</p>
-            </div>
-          </div>
-        ))}
-      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Analytics Section */}
         <div className="lg:col-span-2 space-y-8">
-          <Card className="border-none shadow-sm overflow-hidden">
-            <CardHeader className="bg-white border-b border-[#eee] flex flex-row items-center justify-between py-5">
-              <div>
-                <CardTitle className="text-lg font-bold">User Registration Growth</CardTitle>
-                <CardDescription>New learner signups over time</CardDescription>
+          <Card className="border border-slate-100 shadow-sm rounded-3xl overflow-hidden bg-white">
+            <CardHeader className="flex flex-row items-center justify-between py-6 px-8 border-b border-slate-50">
+              <div className="space-y-0.5">
+                <CardTitle className="text-sm font-bold text-slate-900 tracking-tight">Growth Comparison</CardTitle>
+                <CardDescription className="text-[10px] font-medium text-slate-400">Compare signups between months</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-100 font-bold">
-                  +24% Growth
-                </Badge>
-                <Select defaultValue="6m">
-                  <SelectTrigger className="w-[100px] h-8 text-xs">
-                    <SelectValue placeholder="Range" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1m">Last Month</SelectItem>
-                    <SelectItem value="6m">Last 6 Months</SelectItem>
-                    <SelectItem value="1y">Last Year</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center gap-4 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+                <div className="flex bg-white rounded-xl shadow-sm p-1 border border-slate-100">
+                  <button 
+                    onClick={() => setComparisonMode('monthly')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-[10px] font-bold transition-all",
+                      comparisonMode === 'monthly' ? "bg-slate-900 text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                    )}
+                  >
+                    Monthly
+                  </button>
+                  <button 
+                    onClick={() => setComparisonMode('daily')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-[10px] font-bold transition-all",
+                      comparisonMode === 'daily' ? "bg-slate-900 text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                    )}
+                  >
+                    Daily
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  {comparisonMode === 'monthly' ? (
+                    <>
+                      {(() => {
+                        const monthsList = [];
+                        const now = new Date();
+                        for (let i = 0; i < 12; i++) {
+                          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                          monthsList.push(d.toLocaleString('default', { month: 'long' }) + ' ' + d.getFullYear());
+                        }
+                        
+                        return (
+                          <>
+                            <Select value={monthA} onValueChange={setMonthA}>
+                              <SelectTrigger className="w-[120px] h-7 text-[10px] font-bold border-none bg-transparent">
+                                <SelectValue placeholder="Month A" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl border-slate-100">
+                                {monthsList.map((m: string) => (
+                                  <SelectItem key={m} value={m} className="text-[10px] font-bold">{m}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <span className="text-[10px] font-black text-slate-300 px-1">VS</span>
+                            <Select value={monthB} onValueChange={setMonthB}>
+                              <SelectTrigger className="w-[120px] h-7 text-[10px] font-bold border-none bg-transparent">
+                                <SelectValue placeholder="Month B" />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl border-slate-100">
+                                {monthsList.map((m: string) => (
+                                  <SelectItem key={m} value={m} className="text-[10px] font-bold">{m}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </>
+                        );
+                      })()}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        type="date" 
+                        value={dayA} 
+                        onChange={(e) => setDayA(e.target.value)} 
+                        className="w-[130px] h-7 text-[10px] font-bold border-none bg-transparent focus-visible:ring-0"
+                      />
+                      <span className="text-[10px] font-black text-slate-300 px-1">VS</span>
+                      <Input 
+                        type="date" 
+                        value={dayB} 
+                        onChange={(e) => setDayB(e.target.value)} 
+                        className="w-[130px] h-7 text-[10px] font-bold border-none bg-transparent focus-visible:ring-0"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="p-6">
-              <div className="h-[350px] w-full min-h-[350px]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={300}>
-                  <AreaChart data={analytics?.userGrowth || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#F26522" stopOpacity={0.2}/>
-                        <stop offset="95%" stopColor="#F26522" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 500, fill: '#6A6F73'}} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 500, fill: '#6A6F73'}} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                      itemStyle={{ color: '#F26522', fontWeight: 700 }}
-                    />
-                    <Area type="monotone" dataKey="count" stroke="#F26522" strokeWidth={3} fillOpacity={1} fill="url(#colorGrowth)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+            <CardContent className="p-8 space-y-8">
+              {(() => {
+                let dataA, dataB, labelA, labelB;
+                
+                if (comparisonMode === 'monthly') {
+                  dataA = analytics?.userGrowth?.find((d: any) => d.month === monthA) || { count: 0 };
+                  dataB = analytics?.userGrowth?.find((d: any) => d.month === monthB) || { count: 0 };
+                  labelA = monthA;
+                  labelB = monthB;
+                } else {
+                  // Range-based cumulative logic for Daily mode
+                  const start = new Date(dayA);
+                  start.setHours(0, 0, 0, 0);
+                  
+                  const end = new Date(dayB);
+                  end.setHours(23, 59, 59, 999);
+
+                  // Point A: Total users created strictly BEFORE the start date
+                  const countA = allUsers?.filter(u => {
+                    if (!u.created_at) return false;
+                    const uDate = new Date(u.created_at);
+                    return uDate < start;
+                  }).length || 0;
+
+                  // Point B: Total users created ON OR BEFORE the end date
+                  const countB = allUsers?.filter(u => {
+                    if (!u.created_at) return false;
+                    const uDate = new Date(u.created_at);
+                    return uDate <= end;
+                  }).length || 0;
+
+                  dataA = { count: countA };
+                  dataB = { count: countB };
+                  labelA = new Date(dayA).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
+                  labelB = new Date(dayB).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
+                }
+
+                const growthDiff = dataB.count - dataA.count;
+                const growthVal = dataA.count > 0 ? Math.round((growthDiff / dataA.count) * 100) : growthDiff * 100;
+                const isUp = growthDiff >= 0;
+
+                const compData = [
+                  { name: labelA, count: dataA.count },
+                  { name: 'Comparison', count: (dataA.count + dataB.count) / 2 },
+                  { name: labelB, count: dataB.count }
+                ];
+
+                return (
+                  <>
+                    <div>
+                      <div className="flex items-baseline gap-3">
+                        <h4 className="text-4xl font-black text-slate-900 tracking-tighter">
+                          {comparisonMode === 'daily' ? `+${growthDiff}` : dataB.count}
+                        </h4>
+                        <div className={cn(
+                          "flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-lg",
+                          isUp ? "text-emerald-600 bg-emerald-50" : "text-red-600 bg-red-50"
+                        )}>
+                          {isUp ? "↑" : "↓"} {Math.abs(growthVal)}% Growth
+                        </div>
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                        {comparisonMode === 'daily' 
+                          ? `${growthDiff} new users added between ${labelA} and ${labelB}`
+                          : (isUp ? `Growth increased from ${labelA} to ${labelB}` : `${labelB} gained fewer users than ${labelA}`)
+                        }
+                      </p>
+                    </div>
+
+                    <div className="h-[220px] w-full pt-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={compData} margin={{ top: 0, right: 20, left: 20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="mountainGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#F26522" stopOpacity={0.15}/>
+                              <stop offset="95%" stopColor="#F26522" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length && payload[0].payload.name !== 'Comparison') {
+                                return (
+                                  <div className="bg-white/95 backdrop-blur-md border border-slate-100 p-3 rounded-2xl shadow-xl">
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{payload[0].payload.name}</p>
+                                    <p className="text-lg font-black text-slate-900">{payload[0].value} Users</p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="count" 
+                            stroke="#F26522" 
+                            strokeWidth={4} 
+                            fillOpacity={1} 
+                            fill="url(#mountainGradient)" 
+                            animationDuration={1500}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest px-4 border-t border-slate-50 pt-6">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-slate-200" />
+                        <span>{labelA} • {dataA.count} USERS</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-900">
+                        <div className="w-2 h-2 rounded-full bg-orange-500" />
+                        <span>{labelB} • {dataB.count} USERS</span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
 

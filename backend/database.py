@@ -106,6 +106,18 @@ def create_tables():
                 conn.commit()
             print("Added department column to users table")
 
+        if 'phone' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20)"))
+                conn.commit()
+            print("Added phone column to users table")
+
+        if 'country_code' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN country_code VARCHAR(10)"))
+                conn.commit()
+            print("Added country_code column to users table")
+
         # Company SaaS columns
         company_columns = [c['name'] for c in inspector.get_columns('companies')]
         if 'is_suspended' not in company_columns:
@@ -158,6 +170,39 @@ def create_tables():
                 conn.execute(text("ALTER TABLE enrollments ADD COLUMN last_reminder_sent_at TIMESTAMP WITH TIME ZONE"))
                 conn.commit()
             print("Added last_reminder_sent_at column to enrollments table")
+
+        # UserProgress pillar columns migration
+        up_columns = [c['name'] for c in inspector.get_columns('user_progress')]
+        if 'video_watched' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN video_watched BOOLEAN DEFAULT FALSE"))
+                conn.commit()
+            print("Added video_watched to user_progress")
+        if 'notes_viewed' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN notes_viewed BOOLEAN DEFAULT FALSE"))
+                conn.commit()
+            print("Added notes_viewed to user_progress")
+        if 'assignment_submitted' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN assignment_submitted BOOLEAN DEFAULT FALSE"))
+                conn.commit()
+            print("Added assignment_submitted to user_progress")
+        if 'quiz_completed' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN quiz_completed BOOLEAN DEFAULT FALSE"))
+                conn.commit()
+            print("Added quiz_completed to user_progress")
+        if 'last_video_timestamp' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN last_video_timestamp FLOAT DEFAULT 0.0"))
+                conn.commit()
+            print("Added last_video_timestamp to user_progress")
+        if 'last_tab' not in up_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE user_progress ADD COLUMN last_tab VARCHAR(50) DEFAULT 'video'"))
+                conn.commit()
+            print("Added last_tab to user_progress")
 
         # Course columns
         courses_columns = [c['name'] for c in inspector.get_columns('courses')]

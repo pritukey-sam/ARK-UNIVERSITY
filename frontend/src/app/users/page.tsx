@@ -51,7 +51,7 @@ export default function UsersPage() {
   const [hrUsers, setHrUsers] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
-    name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: ''
+    name: '', email: '', role: 'employee', department: 'Engineering', employee_id: ''
   });
   
   const [assignData, setAssignData] = useState({
@@ -87,7 +87,7 @@ export default function UsersPage() {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.email || !formData.password) {
+    if (!formData.name || !formData.email) {
       return toast.error("Please fill in all required fields");
     }
     try {
@@ -95,7 +95,7 @@ export default function UsersPage() {
       await api.admin.createUser(formData);
       toast.success("User successfully added to platform");
       setIsAddModalOpen(false);
-      setFormData({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+      setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
       fetchData();
     } catch (error: any) {
       toast.error(error.message || "Failed to create user");
@@ -139,7 +139,6 @@ export default function UsersPage() {
     setFormData({
       name: user.name,
       email: user.email,
-      password: '',
       role: user.role,
       department: user.department || 'Engineering',
       employee_id: user.employee_id || ''
@@ -259,7 +258,7 @@ export default function UsersPage() {
         <div className="flex gap-4 items-center w-full md:w-auto">
           {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') && (
             <Button onClick={() => {
-              setFormData({ name: '', email: '', password: '', role: 'employee', department: 'Engineering', employee_id: '' });
+              setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
               setIsAddModalOpen(true);
             }} className="bg-[#F26522] hover:bg-[#D54D10] text-white font-bold h-11 px-6 rounded-xl shadow-lg shadow-orange-200 transition-all active:scale-95">
               <UserPlus className="w-4 h-4 mr-2" /> Add User
@@ -287,7 +286,7 @@ export default function UsersPage() {
                 <SelectTrigger className="h-11 border-gray-200 rounded-xl bg-white font-bold text-xs">
                   <div className="flex items-center gap-2">
                     <Shield className="w-3.5 h-3.5 text-gray-400" />
-                    <SelectValue placeholder="Role" />
+                    {roleFilter === 'All' ? <span>All Users</span> : <SelectValue placeholder="Role" />}
                   </div>
                 </SelectTrigger>
                 <SelectContent className="bg-white rounded-xl border-gray-100 shadow-xl">
@@ -306,7 +305,7 @@ export default function UsersPage() {
                 <SelectTrigger className="h-11 border-gray-200 rounded-xl bg-white font-bold text-xs">
                   <div className="flex items-center gap-2">
                     <BookOpen className="w-3.5 h-3.5 text-gray-400" />
-                    <SelectValue placeholder="Course" />
+                    {courseFilter === 'All' ? <span>All Courses</span> : <SelectValue placeholder="Course" />}
                   </div>
                 </SelectTrigger>
                 <SelectContent className="bg-white rounded-xl border-gray-100 shadow-xl max-h-60 overflow-y-auto">
@@ -505,10 +504,6 @@ export default function UsersPage() {
                   <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Email Address</Label>
                   <Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="john@company.com" className="border-gray-200 h-11 rounded-xl" />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Password</Label>
-                <Input type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="••••••••" className="border-gray-200 h-11 rounded-xl" />
               </div>
 
               <Button type="submit" disabled={submitting} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white font-black h-12 mt-4 rounded-xl shadow-lg shadow-orange-100">

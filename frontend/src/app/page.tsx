@@ -1,13 +1,12 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { BookOpen, ShieldCheck, BarChart3, Users, ArrowRight } from 'lucide-react';
+import { BookOpen, BarChart3, Users } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
+import { motion } from 'framer-motion';
 
 export default function LandingPage() {
- const router = useRouter();
 
  return (
  <div className="min-h-screen bg-white">
@@ -21,12 +20,6 @@ export default function LandingPage() {
  </div>
  <div className="flex items-center gap-6">
  <Link href="/login" className="text-sm font-medium text-[#6A6F73] hover:text-[#111]">Login</Link>
- <Button 
- className="bg-[#F26522] hover:bg-[#D54D10] text-white px-6 rounded-lg font-bold"
- onClick={() => router.push('/register-company')}
- >
- Get Started
- </Button>
  </div>
  </nav>
 
@@ -40,55 +33,40 @@ export default function LandingPage() {
  <p className="text-xl text-[#6A6F73] max-w-lg">
  The all-in-one platform for corporate training, module management, and employee performance tracking.
  </p>
- <div className="flex gap-4">
- <Button 
- size="lg" 
- className="bg-[#F26522] hover:bg-[#D54D10] text-white px-8 h-14 rounded-xl font-bold shadow-lg"
- onClick={() => router.push('/register-company')}
- >
- Register your Company
- </Button>
- <Button 
- size="lg" 
- variant="outline" 
- className="border-[#eee] px-8 h-14 rounded-xl font-bold hover:bg-white"
- onClick={() => router.push('/login')}
- >
- Sign In
- </Button>
- </div>
- <div className="flex items-center gap-6 pt-8">
- <div className="flex -space-x-2">
- {[1,2,3,4].map(i => (
- <div key={i} className="w-10 h-10 rounded-full border-2 border-white bg-white" />
- ))}
- </div>
- <p className="text-sm text-[#6A6F73] font-medium">Joined by 500+ companies worldwide</p>
- </div>
  </div>
  <div className="relative">
- <div className="aspect-square bg-orange-50 rounded-[40px] flex items-center justify-center p-12">
- <div className="w-full h-full bg-white rounded-3xl shadow-sm border border-[#eee] p-8 space-y-6">
- <div className="flex justify-between items-center">
- <div className="h-4 w-32 bg-white rounded-full" />
- <div className="h-8 w-8 bg-orange-100 rounded-lg" />
- </div>
- <div className="space-y-3">
- <div className="h-4 w-full bg-white rounded-full" />
- <div className="h-4 w-5/6 bg-white rounded-full" />
- </div>
- <div className="grid grid-cols-2 gap-4 pt-4">
- <div className="h-24 bg-blue-50 rounded-2xl p-4 space-y-2">
- <div className="h-3 w-12 bg-blue-100 rounded-full" />
- <div className="h-6 w-8 bg-blue-200 rounded-md" />
- </div>
- <div className="h-24 bg-green-50 rounded-2xl p-4 space-y-2">
- <div className="h-3 w-12 bg-green-100 rounded-full" />
- <div className="h-6 w-8 bg-green-200 rounded-md" />
- </div>
- </div>
- </div>
- </div>
+ <motion.div 
+ initial={{ opacity: 0, scale: 0.95 }}
+ animate={{ opacity: 1, scale: 1 }}
+ transition={{ duration: 0.8, ease: "easeOut" }}
+ className="aspect-square bg-orange-50 rounded-[40px] flex items-center justify-center p-8"
+ >
+ <motion.div 
+ animate={{ y: [0, -15, 0] }}
+ transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+ className="relative w-full h-full bg-white rounded-3xl shadow-2xl border border-[#eee] overflow-hidden"
+ >
+ <Image 
+ src="/hero-illustration.png"
+ alt="Lumina LMS Learning Experience"
+ fill
+ className="object-cover"
+ priority
+ />
+ </motion.div>
+ </motion.div>
+ 
+ {/* Decorative elements */}
+ <motion.div 
+ animate={{ y: [0, 10, 0] }}
+ transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+ className="absolute -bottom-6 -right-6 w-32 h-32 bg-orange-100 rounded-full blur-3xl -z-10 opacity-50" 
+ />
+ <motion.div 
+ animate={{ y: [0, -10, 0] }}
+ transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+ className="absolute -top-6 -left-6 w-32 h-32 bg-blue-100 rounded-full blur-3xl -z-10 opacity-50" 
+ />
  </div>
  </div>
  </main>

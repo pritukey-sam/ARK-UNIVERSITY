@@ -126,50 +126,132 @@ export default function CoursesPage() {
           ))}
         </div>
       ) : filtered.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
-          {filtered.map((course) => (
-            <div key={course.id} className="relative group h-full">
-              <Link href={`/courses/${course.id}`} className="block h-full">
-                <Card className="bg-white h-full overflow-hidden flex flex-col border border-gray-200/80 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-gray-300 hover:-translate-y-1 transition-all duration-300">
-                  <div className="aspect-video bg-white border-b border-[#eee]">
-                    <img src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800'} alt="" className="w-full h-full object-cover" />
-                  </div>
-                  <CardContent className="p-4 flex-1 flex flex-col justify-between">
-                    <div>
-                      <h3 className="font-bold text-[#111] line-clamp-2">{course.title}</h3>
-                      <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{course.description}</p>
+        user?.role === 'employee' ? (
+          <div className="space-y-12 pb-12">
+            {/* My Assigned Courses Section */}
+            <section className="space-y-6">
+              <h2 className="text-xl font-bold text-[#111] flex items-center gap-2">
+                <div className="w-1.5 h-6 bg-[#F26522] rounded-full" />
+                My Assigned Courses
+              </h2>
+              {filtered.filter(c => c.is_enrolled).length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
+                  {filtered.filter(c => c.is_enrolled).map((course) => (
+                    <div key={course.id} className="relative group h-full">
+                      <Link href={`/courses/${course.id}`} className="block h-full">
+                        <Card className="bg-white h-full overflow-hidden flex flex-col border border-gray-200/80 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-gray-300 hover:-translate-y-1 transition-all duration-300">
+                          <div className="aspect-video bg-white border-b border-[#eee]">
+                            <img src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800'} alt="" className="w-full h-full object-cover" />
+                          </div>
+                          <CardContent className="p-4 flex-1 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-bold text-[#111] line-clamp-2">{course.title}</h3>
+                              <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{course.description}</p>
+                            </div>
+                            <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-[#6A6F73] uppercase">
+                              <div className="flex items-center gap-1">
+                                <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
+                              </div>
+                              <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </Link>
                     </div>
-                    <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-[#6A6F73] uppercase">
-                      <div className="flex items-center gap-1">
-                        <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
-                      </div>
-                      <span>{formatDuration(course.total_duration_seconds || 0)}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-              {user?.role === 'admin' && (
-                <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                  <Button 
-                    size="icon" 
-                    variant="secondary" 
-                    className="h-8 w-8 bg-white hover:bg-gray-100 text-[#111] shadow-md border border-gray-200 rounded-full" 
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditCourse(course); setIsEditOpen(true); }}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button 
-                    size="icon" 
-                    className="h-8 w-8 bg-red-500 hover:bg-red-600 text-white shadow-md border border-red-600 rounded-full" 
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCourseToDelete(course); setIsDeleteOpen(true); }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 bg-white border border-gray-100 rounded-xl flex flex-col items-center justify-center text-center">
+                  <p className="text-sm font-medium text-gray-500">No assigned courses yet</p>
                 </div>
               )}
-            </div>
-          ))}
-        </div>
+            </section>
+
+            {/* Available Courses Section */}
+            <section className="space-y-6">
+              <h2 className="text-xl font-bold text-[#111] flex items-center gap-2">
+                <div className="w-1.5 h-6 bg-gray-200 rounded-full" />
+                Available Courses
+              </h2>
+              {filtered.filter(c => !c.is_enrolled).length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
+                  {filtered.filter(c => !c.is_enrolled).map((course) => (
+                    <div key={course.id} className="relative group h-full">
+                      <Link href={`/courses/${course.id}`} className="block h-full">
+                        <Card className="bg-white h-full overflow-hidden flex flex-col border border-gray-200/80 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-gray-300 hover:-translate-y-1 transition-all duration-300">
+                          <div className="aspect-video bg-white border-b border-[#eee]">
+                            <img src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800'} alt="" className="w-full h-full object-cover" />
+                          </div>
+                          <CardContent className="p-4 flex-1 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-bold text-[#111] line-clamp-2">{course.title}</h3>
+                              <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{course.description}</p>
+                            </div>
+                            <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-[#6A6F73] uppercase">
+                              <div className="flex items-center gap-1">
+                                <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
+                              </div>
+                              <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 bg-white border border-gray-100 rounded-xl flex flex-col items-center justify-center text-center">
+                  <p className="text-sm font-medium text-gray-500">No additional courses available</p>
+                </div>
+              )}
+            </section>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8">
+            {filtered.map((course) => (
+              <div key={course.id} className="relative group h-full">
+                <Link href={`/courses/${course.id}`} className="block h-full">
+                  <Card className="bg-white h-full overflow-hidden flex flex-col border border-gray-200/80 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:border-gray-300 hover:-translate-y-1 transition-all duration-300">
+                    <div className="aspect-video bg-white border-b border-[#eee]">
+                      <img src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800'} alt="" className="w-full h-full object-cover" />
+                    </div>
+                    <CardContent className="p-4 flex-1 flex flex-col justify-between">
+                      <div>
+                        <h3 className="font-bold text-[#111] line-clamp-2">{course.title}</h3>
+                        <p className="text-xs text-[#6A6F73] mt-1 line-clamp-2">{course.description}</p>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-[#6A6F73] uppercase">
+                        <div className="flex items-center gap-1">
+                          <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
+                        </div>
+                        <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+                {user?.role === 'admin' && (
+                  <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    <Button 
+                      size="icon" 
+                      variant="secondary" 
+                      className="h-8 w-8 bg-white hover:bg-gray-100 text-[#111] shadow-md border border-gray-200 rounded-full" 
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditCourse(course); setIsEditOpen(true); }}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button 
+                      size="icon" 
+                      className="h-8 w-8 bg-red-500 hover:bg-red-600 text-white shadow-md border border-red-600 rounded-full" 
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCourseToDelete(course); setIsDeleteOpen(true); }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
       ) : (
         <div className="text-center py-20 bg-white border border-[#eee] rounded-xl">
           <BookMarked className="w-12 h-12 text-[#6A6F73] mx-auto mb-4 opacity-20" />

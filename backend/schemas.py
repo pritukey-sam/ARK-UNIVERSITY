@@ -220,19 +220,25 @@ class UserVideoProgressOut(BaseModel):
 
 class ModuleProgressDetail(BaseModel):
     module_id: int
-    progress_percent: int
+    overall_progress: int
     video_completed: bool
     notes_completed: bool
-    assignment_submitted: bool
+    assignment_completed: bool
     quiz_completed: bool
-    last_video_timestamp: float
-    last_tab: str
+    last_video_timestamp: float = 0.0
+    last_tab: str = "video"
     quiz_unlocked: bool = False
     videos: List[UserVideoProgressOut] = []
 
 class VideoProgressUpdate(BaseModel):
     video_id: int
-    watched_seconds: float
+    watched_seconds: float = 0.0
+    completed: bool = False
+    module_id: Optional[int] = None
+
+class NotesProgressUpdate(BaseModel):
+    module_id: int
+    completed: bool
 
 
 class ModuleProgressUpdate(BaseModel):

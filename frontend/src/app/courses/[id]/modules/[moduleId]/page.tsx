@@ -1,7 +1,9 @@
+// Force Rebuild - Triggered stability sync
 'use client';
 
 import React, { useState, useEffect, use, useRef, Suspense, useCallback } from 'react';
 import { api } from '@/lib/api';
+import BackNavigation from '@/components/common/BackNavigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
@@ -114,8 +116,10 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
             let initialVid = initialMod.videos[0];
             if (modProg?.videos) {
               for (const v of initialMod.videos) {
-                const vp = modProg.videos.find((p: any) => p.video_id === v.id);
-                if (!vp?.is_completed) { initialVid = v; break; }
+                if (v && v.id) {
+                  const vp = modProg.videos.find((p: any) => p.video_id === v.id);
+                  if (!vp?.is_completed) { initialVid = v; break; }
+                }
               }
             }
             setSelectedVideo(initialVid);
@@ -160,14 +164,19 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
 
   const initPlayer = (video: any) => {
     if (!video || !window.YT || !window.YT.Player || !apiReady) return;
+    if (!document.getElementById('youtube-player-element')) return;
     const videoId = getYouTubeId(video.video_url);
     if (!videoId) return;
 
     if (playerInstance.current) {
       try {
-        if (playerReady.current) {
-          playerInstance.current.loadVideoById(videoId);
-          return;
+        if (playerReady.current && playerInstance.current && typeof playerInstance.current.loadVideoById === 'function') {
+          try {
+            playerInstance.current.loadVideoById(videoId);
+            return;
+          } catch (loadErr) {
+            console.warn("YouTube loadVideoById failed, forcing re-init:", loadErr);
+          }
         }
         playerInstance.current.destroy();
       } catch (e) {
@@ -217,7 +226,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         const duration = playerInstance.current.getDuration();
         if (duration > 0) {
           updateVideoProgress(selectedVideo.id, currentTime);
-          if (currentTime >= (duration * 0.9)) {
+          if (currentTime >= (duration * 0.8)) {
             handleVideoComplete(selectedVideo.id);
           }
         }
@@ -225,20 +234,27 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     }, 10000); // Sync every 10s to be polite
   };
 
-  const updateVideoProgress = async (videoId: number, seconds: number) => {
+   const updateVideoProgress = async (videoId: number, seconds: number, completed = false) => {
+    if (!activeModule?.id || !videoId) return;
     try {
-      await api.employee.updateVideoProgress({ video_id: videoId, watched_seconds: seconds });
+      await api.employee.updateVideoProgress({ 
+        module_id: activeModule.id,
+        video_id: videoId, 
+        watched_seconds: seconds,
+        completed: completed
+      });
     } catch (e) {}
   };
 
   const handleVideoComplete = async (videoId: number) => {
     try {
-      const res = await api.employee.updateVideoProgress({ video_id: videoId, watched_seconds: 999999 }); // Force complete
-      if (res.is_completed) {
-        // Refresh progress data
-        await fetchCourseData(true);
-      }
-    } catch (e) {}
+      await updateVideoProgress(videoId, 999999, true); // Force complete with high timestamp
+    } catch (e) {
+      console.error("Failed to update video progress, but refreshing UI anyway:", e);
+    } finally {
+      // Always refresh to ensure UI reflects latest state
+      await fetchCourseData(true);
+    }
   };
 
   useEffect(() => {
@@ -262,6 +278,77 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     return () => { cancelled = true; };
   }, [selectedVideo?.id, activeTab]);
 
+  // Precise Progress Calculations
+  const currProg = progressData[activeModule?.id || 0] || {};
+
+  // SAFE Progress Booleans
+  const totalVideos = activeModule?.videos?.length || 0;
+  const completedVideos = currProg?.videos?.filter((v: any) => v?.is_completed)?.length || 0;
+  
+  // A module's videos are done if there are no videos, or if all videos are completed
+  const videosDone = totalVideos === 0 || (totalVideos > 0 && completedVideos >= totalVideos);
+  
+  // Notes are done if they don't exist or if marked completed
+  const hasNotes = (activeModule?.notes?.length || 0) > 0;
+  const notesDone = !hasNotes || currProg?.notes_completed === true;
+  
+  // Assignments are done if they don't exist or if submitted
+  const hasAssignment = (activeModule?.assignments?.length || 0) > 0;
+  const assignmentDone = !hasAssignment || currProg?.assignment_completed === true;
+
+  const hasQuiz = (activeModule?.quizzes?.length || 0) > 0;
+
+  // The Master Unlock Condition
+  const canUnlockQuiz = videosDone && notesDone && assignmentDone;
+  const assessmentLocked = !canUnlockQuiz;
+
+  // DEBUG: Expose exactly which condition is failing
+  console.log('[QUIZ UNLOCK DEBUG]', {
+    moduleId: activeModule?.id,
+    totalVideos,
+    completedVideos,
+    videosDone,
+    notesDone,
+    assignmentDone,
+    hasQuiz,
+    canUnlockQuiz,
+    assessmentLocked,
+    rawProgressForModule: currProg
+  });
+
+  // Weighted Overall Progress Calculation
+  const calculateOverallProgress = () => {
+    if (!activeModule) return 0;
+    let completedItems = 0;
+    let totalItems = 0;
+
+    // Videos
+    totalItems += totalVideos;
+    completedItems += completedVideos;
+
+    // Notes
+    if (activeModule.notes?.length > 0) {
+      totalItems += 1;
+      if (notesDone) completedItems += 1;
+    }
+
+    // Assignments
+    if (activeModule.assignments?.length > 0) {
+      totalItems += 1;
+      if (assignmentDone) completedItems += 1;
+    }
+
+    // Quizzes (Final Assessment)
+    if (activeModule.quizzes?.length > 0) {
+      totalItems += 1;
+      if (currProg?.quiz_completed === true) completedItems += 1;
+    }
+
+    return totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+  };
+
+  const overallProgress = calculateOverallProgress();
+
   useEffect(() => {
     if (secureVideoUrl && apiReady && activeTab === 'video' && getYouTubeId(secureVideoUrl)) {
       const timer = setTimeout(() => initPlayer(selectedVideo), 100);
@@ -269,24 +356,29 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     }
   }, [secureVideoUrl, apiReady, selectedVideo, activeTab]);
 
-  // Track notes view
-  useEffect(() => {
-    if (activeTab === 'notes' && activeModule && !progressData[activeModule.id]?.notes_completed) {
-      api.employee.updateDetailedProgress({ 
-        course_id: parseInt(id), 
+  const handleMarkNotesRead = async () => {
+    if (!activeModule) return;
+    try {
+      await api.employee.markNotesComplete({ 
         module_id: activeModule.id, 
-        notes_viewed: true 
-      }).then(() => fetchCourseData(true));
+        completed: true 
+      });
+      toast.success("Notes marked as read!");
+      await fetchCourseData(true);
+    } catch (e: any) {
+      toast.error("Failed to update notes progress");
     }
-  }, [activeTab, activeModule, id, fetchCourseData, progressData]);
+  };
 
   const handleModuleClick = async (mod: any) => {
     const modIdx = modules.indexOf(mod);
     if (modIdx > 0) {
       const prevMod = modules[modIdx - 1];
-      if (!progressData[prevMod.id]?.is_completed) {
-        toast.error("Complete the previous module first");
-        return;
+      if (prevMod && prevMod.id) {
+        if (!progressData[prevMod.id]?.is_completed) {
+          toast.error("Complete the previous module first");
+          return;
+        }
       }
     }
     
@@ -298,10 +390,12 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
       let initialVid = mod.videos[0];
       if (modProg?.videos) {
         for (const v of mod.videos) {
-          const vp = modProg.videos.find((p: any) => p.video_id === v.id);
-          if (!vp?.is_completed) {
-            initialVid = v;
-            break;
+          if (v && v.id) {
+            const vp = modProg.videos.find((p: any) => p.video_id === v.id);
+            if (!vp?.is_completed) {
+              initialVid = v;
+              break;
+            }
           }
         }
       }
@@ -316,35 +410,36 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     const vidIdx = activeModule.videos.indexOf(video);
     if (vidIdx > 0) {
       const prevVid = activeModule.videos[vidIdx - 1];
-      const prevProg = progressData[activeModule.id]?.videos?.find((v: any) => v.video_id === prevVid.id);
-      if (!prevProg?.is_completed) {
-        toast.error("Watch the previous video first");
-        return;
+      if (prevVid && prevVid.id) {
+        const prevProg = progressData[activeModule.id]?.videos?.find((v: any) => v.video_id === prevVid.id);
+        if (!prevProg?.is_completed) {
+          toast.error("Watch the previous video first");
+          return;
+        }
       }
     }
     setSelectedVideo(video);
   };
 
   const isModuleLocked = (mod: any) => {
+    if (!modules || !mod) return true;
     const idx = modules.indexOf(mod);
-    if (idx === 0) return false;
+    if (idx <= 0) return false;
     const prev = modules[idx - 1];
+    if (!prev || !prev.id) return false;
     return !progressData[prev.id]?.is_completed;
   };
 
   const isVideoLocked = (vid: any) => {
-    if (!activeModule) return true;
+    if (!activeModule || !activeModule.videos || !vid) return true;
     const idx = activeModule.videos.indexOf(vid);
-    if (idx === 0) return false;
+    if (idx <= 0) return false;
     const prev = activeModule.videos[idx - 1];
+    if (!prev || !prev.id) return false;
     const prevProg = progressData[activeModule.id]?.videos?.find((v: any) => v.video_id === prev.id);
     return !prevProg?.is_completed;
   };
-
-  const isQuizLocked = () => {
-    if (!activeModule) return true;
-    return !progressData[activeModule.id]?.quiz_unlocked;
-  };
+  const isQuizLocked = () => assessmentLocked;
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-white space-y-4">
@@ -389,33 +484,16 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     <div className="min-h-screen bg-white font-sans text-[#111]">
       <header className="h-16 border-b border-gray-200 bg-white flex items-center px-6 sticky top-0 z-[100] shadow-sm">
         <div className="flex items-center gap-6 w-full max-w-full mx-auto">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => router.push('/dashboard')}
-            className="text-gray-500 hover:text-[#111] hover:bg-gray-100 rounded-lg font-bold text-[11px] uppercase tracking-wider gap-2 px-3"
-          >
-            <ArrowLeft className="w-4 h-4" /> Dashboard
-          </Button>
-          <div className="h-4 w-px bg-gray-200" />
-          <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-wider overflow-hidden">
-            <span className="truncate max-w-[200px]">{course.title}</span>
-            {activeModule && (
-              <>
-                <ChevronRight className="w-3 h-3 opacity-30 shrink-0" />
-                <span className="text-[#111] truncate">{activeModule.title}</span>
-              </>
-            )}
-          </div>
+          <BackNavigation />
           <div className="flex-1" />
           <div className="flex items-center gap-4">
             <div className="hidden md:flex flex-col items-end">
                <p className="text-[10px] font-bold text-gray-400 uppercase">Overall Progress</p>
                <div className="flex items-center gap-2">
                  <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                   <div className="h-full bg-green-500" style={{ width: `${course.progress_percent || 0}%` }} />
+                   <div className="h-full bg-green-500" style={{ width: `${overallProgress}%` }} />
                  </div>
-                 <span className="text-xs font-bold text-green-600">{course.progress_percent || 0}%</span>
+                 <span className="text-xs font-bold text-green-600">{overallProgress}%</span>
                </div>
             </div>
           </div>
@@ -463,7 +541,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                    
                    {isActive && (
                      <div className="pl-4 pr-1 py-1 space-y-1 animate-in slide-in-from-top-2 duration-300">
-                        {mod.videos?.map((vid: any, vIdx: number) => {
+                        {mod.videos?.filter((v: any) => v && v.id).map((vid: any, vIdx: number) => {
                           const isVidLocked = isVideoLocked(vid);
                           const isVidActive = selectedVideo?.id === vid.id;
                           const vidProg = prog?.videos?.find((v: any) => v.video_id === vid.id);
@@ -623,9 +701,24 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                                <h3 className="text-2xl font-black text-[#111] tracking-tight">Study Materials</h3>
                                <p className="text-sm text-gray-400 font-bold uppercase mt-1">Reference Documentation & Resources</p>
                             </div>
-                            <Badge className="bg-blue-50 text-blue-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full">
-                               {activeModule.notes?.length || 0} Assets
-                            </Badge>
+                            <div className="flex items-center gap-4">
+                               {!notesDone && activeModule.notes?.length > 0 && (
+                                 <Button 
+                                   onClick={handleMarkNotesRead}
+                                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase tracking-widest h-10 px-6 rounded-xl shadow-lg shadow-emerald-100"
+                                 >
+                                   <Check className="w-4 h-4 mr-2" /> Mark as Read
+                                 </Button>
+                               )}
+                               {notesDone && (
+                                 <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] uppercase px-4 py-2 rounded-xl flex items-center gap-2">
+                                   <CheckCircle2 className="w-4 h-4" /> Completed
+                                 </Badge>
+                               )}
+                               <Badge className="bg-blue-50 text-blue-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-xl">
+                                  {activeModule.notes?.length || 0} Assets
+                               </Badge>
+                            </div>
                          </div>
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                            {activeModule.notes?.length > 0 ? (
@@ -668,7 +761,13 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                                 <h3 className="text-2xl font-black text-[#111] tracking-tight">Assignment Lab</h3>
                                 <p className="text-sm text-gray-400 font-bold uppercase mt-1">Practical Exercises & Submissions</p>
                              </div>
-                             <Badge className="bg-emerald-50 text-emerald-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full">Action Required</Badge>
+                             {progressData[activeModule.id]?.assignment_completed ? (
+                               <Badge className="bg-emerald-50 text-emerald-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full flex items-center gap-2">
+                                 <CheckCircle2 className="w-4 h-4" /> Submitted
+                               </Badge>
+                             ) : (
+                               <Badge className="bg-orange-50 text-orange-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full">Action Required</Badge>
+                             )}
                           </div>
                           {activeModule.assignments?.map((task: any) => (
                              <div key={task.id} className="space-y-8">
@@ -711,16 +810,50 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                                <div className="w-24 h-24 rounded-full bg-white shadow-xl flex items-center justify-center mx-auto text-gray-200 border border-gray-100">
                                   <Lock className="w-10 h-10" />
                                </div>
-                               <div className="space-y-3">
+                               <div className="space-y-3 px-6">
                                   <h3 className="text-2xl font-black text-[#111] tracking-tight">Assessment Locked</h3>
-                                  <p className="text-sm text-gray-400 font-bold uppercase tracking-tight max-w-sm mx-auto opacity-70">Complete all video lectures in this module to unlock the final quiz.</p>
-                               </div>
-                               <Button onClick={() => setActiveTab('video')} variant="outline" className="rounded-full border-gray-200 font-bold text-[10px] uppercase tracking-widest px-8">Return to Lectures</Button>
+                                  <div className="max-w-sm mx-auto space-y-4">
+                                    <p className="text-sm text-gray-400 font-bold uppercase tracking-tight opacity-70">
+                                      To unlock this assessment, please complete:
+                                    </p>
+                                    <div className="flex flex-col gap-2">
+                                      <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", videosDone ? "text-emerald-600" : "text-gray-400")}>
+                                        {videosDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                                        All Video Lectures
+                                      </div>
+                                      <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", notesDone ? "text-emerald-600" : "text-gray-400")}>
+                                        {notesDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                                        Study Materials
+                                      </div>
+                                      {activeModule.assignments?.length > 0 && (
+                                        <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", assignmentDone ? "text-emerald-600" : "text-gray-400")}>
+                                          {assignmentDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                                          Practical Assignment
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <Button onClick={() => setActiveTab('video')} variant="outline" className="rounded-full border-gray-200 font-bold text-[10px] uppercase tracking-widest px-8">Return to Lectures</Button>
+                                </div>
                             </div>
                           ) : activeModule.quizzes?.length > 0 ? (
                             <div className="space-y-8">
                                {activeModule.quizzes.map((quiz: any) => (
-                                 <QuizTaker key={quiz.id} quizId={quiz.id} onComplete={() => fetchCourseData(true)} />
+                                 <div key={quiz.id} className="text-center py-24 space-y-10 bg-white rounded-[3rem] border border-gray-100 shadow-2xl">
+                                    <div className="w-24 h-24 rounded-3xl bg-orange-50 text-[#F26522] flex items-center justify-center mx-auto shadow-sm border border-orange-100">
+                                       <Trophy className="w-12 h-12" />
+                                    </div>
+                                    <div className="space-y-2">
+                                       <h3 className="text-4xl font-black text-[#111] tracking-tight">{quiz.title}</h3>
+                                       <p className="text-sm text-gray-400 font-bold uppercase tracking-widest">Final Module Assessment</p>
+                                    </div>
+                                    <Button 
+                                       onClick={() => router.push(`/courses/${id}/modules/${moduleId}/assessment`)} 
+                                       className="w-full max-w-md bg-[#111] hover:bg-black text-white h-20 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all"
+                                    >
+                                       BEGIN ASSESSMENT
+                                    </Button>
+                                 </div>
                                ))}
                             </div>
                           ) : (
@@ -767,7 +900,7 @@ function SubmissionZone({ moduleId, onSubmitted }: { moduleId: number, onSubmitt
     <Card className="p-12 border-2 border-dashed border-gray-200 bg-gray-50/30 rounded-[2.5rem] text-center space-y-8 hover:bg-emerald-50/20 hover:border-emerald-200 transition-all duration-500">
        <div className="space-y-3">
           <h4 className="text-xl font-black text-[#111] tracking-tight">Submit Your Project</h4>
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Accepted Formats: PDF, ZIP, DOCX (Max 50MB)</p>
+          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Accepted: PDF, Office, Images, ZIP (Max 50MB)</p>
        </div>
        <input type="file" ref={fileRef} className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
        {file ? (
@@ -888,7 +1021,10 @@ function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => v
                </div>
             </div>
 
-            <Button onClick={startQuiz} className="w-full max-w-md bg-[#111] hover:bg-black text-white h-20 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all">
+            <Button 
+               onClick={() => router.push(`/courses/${id}/modules/${moduleId}/assessment`)} 
+               className="w-full max-w-md bg-[#111] hover:bg-black text-white h-20 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all"
+            >
                BEGIN ASSESSMENT
             </Button>
          </div>
