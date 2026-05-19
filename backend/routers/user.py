@@ -40,7 +40,8 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(get_current_
             "plan_type": company.plan_type if company else "free",
             "avatar_url": user.avatar_url,
             "phone": user.phone,
-            "country_code": user.country_code
+            "country_code": user.country_code,
+            "designation": user.designation
         }
     except Exception as e:
         print(f"ERROR IN GET_PROFILE: {str(e)}")

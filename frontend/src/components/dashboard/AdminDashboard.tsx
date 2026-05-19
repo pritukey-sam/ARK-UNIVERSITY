@@ -71,7 +71,9 @@ export default function AdminDashboard() {
     name: '',
     email: '',
     role: 'employee',
-    department: 'Engineering'
+    department: 'Engineering',
+    designation: '',
+    employee_id: ''
   });
 
   const [assignForm, setAssignForm] = useState({
@@ -106,6 +108,21 @@ export default function AdminDashboard() {
       clearInterval(timer);
     };
   }, []);
+
+  const fetchNextId = async (role: string) => {
+    try {
+      const res = await api.admin.getNextUserId(role);
+      setUserForm(prev => ({ ...prev, employee_id: res.employee_id }));
+    } catch (err) {
+      console.error("Failed to load next employee ID:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isUserModalOpen) {
+      fetchNextId(userForm.role);
+    }
+  }, [isUserModalOpen, userForm.role]);
 
   const fetchAll = async () => {
     try {
@@ -167,7 +184,7 @@ export default function AdminDashboard() {
       await api.admin.createUser(userForm);
       toast.success("User added successfully!");
       setIsUserModalOpen(false);
-      setUserForm({ name: '', email: '', role: 'employee', department: 'Engineering' });
+      setUserForm({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
       fetchAll();
     } catch (error: any) {
       toast.error(error.message || "Failed to add user");
@@ -217,10 +234,10 @@ export default function AdminDashboard() {
   if (!mounted) return null;
 
   const kpis = [
-    { label: 'Total Users', value: allUsers?.filter(u => u.role === 'employee').length || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: '+12% this month' },
-    { label: 'Total Courses', value: stats?.totalCourses || 0, icon: BookOpen, color: 'text-[#F26522]', bg: 'bg-orange-50', trend: '+4 new courses' },
-    { label: 'Total Enrollments', value: stats?.totalAssignments || 0, icon: Activity, color: 'text-purple-600', bg: 'bg-purple-50', trend: '85% engagement' },
-    { label: 'Completions', value: stats?.completedAssignments || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50', trend: '92% success rate' },
+    { label: 'Total Users', value: allUsers?.filter(u => u.role === 'employee').length || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: stats?.userGrowthTrend || '0% this month' },
+    { label: 'Total Courses', value: stats?.totalCourses || 0, icon: BookOpen, color: 'text-[#F26522]', bg: 'bg-orange-50', trend: stats?.courseTrend || '+0 new courses' },
+    { label: 'Total Enrollments', value: stats?.totalAssignments || 0, icon: Activity, color: 'text-purple-600', bg: 'bg-purple-50', trend: stats?.engagementTrend || '0% engagement' },
+    { label: 'Completions', value: stats?.completedAssignments || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50', trend: stats?.successTrend || '0% success rate' },
   ];
 
 
@@ -309,6 +326,14 @@ export default function AdminDashboard() {
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address <span className="text-red-500">*</span></Label>
                   <Input id="email" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} placeholder="john@company.com" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="designation">Designation <span className="text-red-500">*</span></Label>
+                  <Input id="designation" value={userForm.designation} onChange={e => setUserForm({...userForm, designation: e.target.value})} placeholder="e.g. AI Engineer" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="employee_id">Employee ID (Auto-Generated)</Label>
+                  <Input id="employee_id" value={userForm.employee_id} disabled className="bg-gray-50 text-gray-500 border-gray-200 cursor-not-allowed font-mono" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role">Role</Label>
@@ -413,10 +438,6 @@ export default function AdminDashboard() {
               </form>
             </DialogContent>
           </Dialog>
-
-          <Button variant="outline" className="border-[#eee] px-3 hover:bg-gray-50" onClick={fetchAll} title="Refresh Data">
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-          </Button>
         </div>
       </div>
 
@@ -720,20 +741,27 @@ export default function AdminDashboard() {
             </Card>
           </div>
 
-          {/* Smart Admin Insights */}
-          <Card className="border-none shadow-sm overflow-hidden">
-            <CardHeader className="border-b border-[#eee] flex flex-row items-center justify-between py-4">
-              <CardTitle className="text-base font-bold flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-[#F26522]" />
-                Smart Insights
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y divide-[#f0f0f0]">
-                <div className="p-4">
-                  <p className="text-xs font-bold text-[#6A6F73] uppercase tracking-wider mb-3">Recently Added Users</p>
-                  <div className="space-y-3">
-                    {allUsers?.slice(0, 4).map((u, i) => (
+          {/* Smart Insights & Recently Created Courses */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Left Card: Smart Insights */}
+            <Card className="border-none shadow-sm overflow-hidden">
+              <CardHeader className="border-b border-[#eee] flex flex-row items-center justify-between py-4">
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-[#F26522]" />
+                  Smart Insights
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                <p className="text-xs font-bold text-[#6A6F73] uppercase tracking-wider mb-3">Recently Added Users</p>
+                <div className="space-y-3">
+                  {[...(allUsers || [])]
+                    .sort((a, b) => {
+                      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                      return dateB - dateA;
+                    })
+                    .slice(0, 4)
+                    .map((u, i) => (
                       <div key={i} className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-[#F26522]/10 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0">
@@ -741,39 +769,47 @@ export default function AdminDashboard() {
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-[#111] truncate">{u.name}</p>
-                            <p className="text-xs text-[#6A6F73]">{u.role}</p>
                           </div>
                         </div>
                         <Badge variant="outline" className="text-[10px] capitalize">{u.role}</Badge>
                       </div>
                     ))}
-                    {(!allUsers || allUsers.length === 0) && (
-                      <p className="text-sm text-[#6A6F73] text-center py-2">No users yet</p>
-                    )}
-                  </div>
+                  {(!allUsers || allUsers.length === 0) && (
+                    <p className="text-sm text-[#6A6F73] text-center py-2">No users yet</p>
+                  )}
                 </div>
-                <div className="p-4">
-                  <p className="text-xs font-bold text-[#6A6F73] uppercase tracking-wider mb-3">Recently Created Courses</p>
-                  <div className="space-y-3">
-                    {courses?.slice(0, 3).map((c, i) => (
-                      <div key={i} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 py-1 rounded-lg transition-colors" onClick={() => router.push(`/courses/${c.id}`)}>
-                        <div className="w-8 h-8 rounded-lg bg-orange-50 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0">
-                          <BookOpen className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-[#111] truncate">{c.title}</p>
-                          <p className="text-xs text-[#6A6F73]">{c.completion_duration_days || 30} days duration</p>
-                        </div>
+              </CardContent>
+            </Card>
+
+            {/* Right Card: Recently Created Courses */}
+            <Card className="border-none shadow-sm overflow-hidden">
+              <CardHeader className="border-b border-[#eee] flex flex-row items-center justify-between py-4">
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-[#F26522]" />
+                  Recently Created Courses
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                <p className="text-xs font-bold text-[#6A6F73] uppercase tracking-wider mb-3">Recently Created Courses</p>
+                <div className="space-y-3">
+                  {courses?.slice(0, 3).map((c, i) => (
+                    <div key={i} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 py-1 rounded-lg transition-colors" onClick={() => router.push(`/courses/${c.id}`)}>
+                      <div className="w-8 h-8 rounded-lg bg-orange-50 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0">
+                        <BookOpen className="w-4 h-4" />
                       </div>
-                    ))}
-                    {(!courses || courses.length === 0) && (
-                      <p className="text-sm text-[#6A6F73] text-center py-2">No courses yet</p>
-                    )}
-                  </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[#111] truncate">{c.title}</p>
+                        <p className="text-xs text-[#6A6F73]">{c.completion_duration_days || 30} days duration</p>
+                      </div>
+                    </div>
+                  ))}
+                  {(!courses || courses.length === 0) && (
+                    <p className="text-sm text-[#6A6F73] text-center py-2">No courses yet</p>
+                  )}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* Sidebar Analytics */}
@@ -898,16 +934,6 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         </div>
-      </div>
-
-      {/* Footer System Info */}
-      <div className="pt-4 border-t border-[#eee] flex flex-col md:flex-row justify-between items-center gap-4 text-[#6A6F73] text-xs font-medium uppercase tracking-widest">
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3" /> System Secure</span>
-          <Separator orientation="vertical" className="h-3" />
-          <span className="flex items-center gap-1.5"><RefreshCw className="w-3 h-3" /> API Connected</span>
-        </div>
-        <p>© 2026 Lumina LMS Enterprise • Dashboard v3.0.4</p>
       </div>
     </div>
   );

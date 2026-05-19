@@ -20,6 +20,7 @@ export default function AssignmentsPage() {
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
+  const [hrUsers, setHrUsers] = useState<any[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [filter, setFilter] = useState('All');
   const [submitting, setSubmitting] = useState(false);
@@ -27,6 +28,7 @@ export default function AssignmentsPage() {
   const [formData, setFormData] = useState({
     user_id: '',
     course_id: '',
+    hr_id: '',
     requested_due_date: '',
     note: ''
   });
@@ -34,14 +36,16 @@ export default function AssignmentsPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      const isAuthority = user?.role === 'hr' || user?.role === 'admin' || user?.role === 'super_admin';
       const [reqData, usersData, coursesData] = await Promise.all([
         api.assignments.getAll(),
-        user?.role === 'hr' ? api.admin.getUsers().then((res: any[]) => res.filter(u => u.role === 'employee')) : Promise.resolve([]),
-        user?.role === 'hr' ? api.common.getCourses() : Promise.resolve([])
+        isAuthority ? api.admin.getUsers() : Promise.resolve([]),
+        isAuthority ? api.common.getCourses() : Promise.resolve([])
       ]);
       setRequests(reqData);
-      if (user?.role === 'hr') {
-        setUsers(usersData);
+      if (isAuthority) {
+        setUsers(usersData.filter((u: any) => u.role === 'employee'));
+        setHrUsers(usersData.filter((u: any) => u.role === 'hr' || u.role === 'admin' || u.role === 'super_admin'));
         setCourses(coursesData);
       }
     } catch (error) {
@@ -55,6 +59,7 @@ export default function AssignmentsPage() {
   useEffect(() => {
     if (user) {
       fetchData();
+      setFormData(prev => ({ ...prev, hr_id: user.id.toString() }));
     }
   }, [user]);
 
@@ -68,13 +73,13 @@ export default function AssignmentsPage() {
       await api.assignments.request({
         user_id: parseInt(formData.user_id),
         course_id: parseInt(formData.course_id),
-        hr_id: user.id,
+        hr_id: formData.hr_id ? parseInt(formData.hr_id) : user.id,
         requested_due_date: formData.requested_due_date ? new Date(formData.requested_due_date).toISOString() : undefined,
         note: formData.note || undefined
       });
       toast.success("Course assigned successfully");
       setIsAddModalOpen(false);
-      setFormData({ user_id: '', course_id: '', requested_due_date: '', note: '' });
+      setFormData({ user_id: '', course_id: '', hr_id: user?.id?.toString() || '', requested_due_date: '', note: '' });
       fetchData();
     } catch (error: any) {
       toast.error(error.message || "Failed to submit assignment");
@@ -176,7 +181,7 @@ export default function AssignmentsPage() {
             {user?.role === 'admin' ? 'Review and manage all corporate learning assignments.' : 'Assign courses to your workforce and track progress.'}
           </p>
         </div>
-        {user?.role === 'hr' && (
+        {(user?.role === 'hr' || user?.role === 'admin' || user?.role === 'super_admin') && (
           <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
             <DialogTrigger
               render={
@@ -225,25 +230,27 @@ export default function AssignmentsPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Due Date (Optional)</Label>
-                  <Input 
-                    type="date"
-                    value={formData.requested_due_date}
-                    onChange={e => setFormData({...formData, requested_due_date: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Reason / Note (Optional)</Label>
-                  <Input 
-                    value={formData.note}
-                    onChange={e => setFormData({...formData, note: e.target.value})}
-                    placeholder="E.g., Required for Q3 compliance"
-                  />
+                  <Label>Choose HR</Label>
+                  <Select value={formData.hr_id} onValueChange={v => setFormData({...formData, hr_id: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select HR...">
+                        {formData.hr_id ? (() => {
+                          const h = hrUsers?.find(u => u.id.toString() === formData.hr_id);
+                          return h ? `${h.name}` : undefined;
+                        })() : undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hrUsers?.map(u => (
+                        <SelectItem key={u.id} value={u.id.toString()}>{u.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                   <p className="text-xs text-blue-800 flex gap-2">
                     <Clock className="w-4 h-4 shrink-0" />
-                    If due date is left blank, it will be automatically calculated based on course duration upon approval.
+                    Due date will be automatically calculated based on course duration.
                   </p>
                 </div>
                 <DialogFooter className="pt-4">
@@ -284,7 +291,6 @@ export default function AssignmentsPage() {
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Employee</th>
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Employee ID</th>
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Course</th>
-                <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Requested By</th>
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Requested Date</th>
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Due Date</th>
                 <th className="py-4 px-6 text-[11px] font-bold text-[#6A6F73] uppercase tracking-wider">Time Left</th>
@@ -310,9 +316,6 @@ export default function AssignmentsPage() {
                     </td>
                     <td className="py-4 px-6">
                       <p className="text-sm font-bold text-[#111]">{req.course_title}</p>
-                    </td>
-                    <td className="py-4 px-6">
-                      <p className="text-sm text-[#111] font-medium">{req.hr_name || 'System'}</p>
                     </td>
                     <td className="py-4 px-6">
                       <p className="text-sm text-[#111] font-medium">{formatDate(req.created_at)}</p>
@@ -389,7 +392,7 @@ export default function AssignmentsPage() {
               })}
               {filteredRequests.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-[#6A6F73]">
+                  <td colSpan={9} className="py-12 text-center text-[#6A6F73]">
                     <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
                     <p className="text-sm font-medium">No assignments found for this filter</p>
                   </td>

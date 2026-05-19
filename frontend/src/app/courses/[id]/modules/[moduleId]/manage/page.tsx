@@ -30,6 +30,13 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  const courseId = parseInt(resolvedParams.id);
  const moduleId = parseInt(resolvedParams.moduleId);
 
+ // Redirect old separate manage flow to the new unified preview/manage watch page
+ useEffect(() => {
+   if (courseId && moduleId) {
+     router.replace(`/courses/${courseId}/modules/${moduleId}/preview`);
+   }
+ }, [courseId, moduleId, router]);
+
  const [course, setCourse] = useState<any>(null);
  const [moduleData, setModuleData] = useState<any>(null);
  const [loading, setLoading] = useState(true);

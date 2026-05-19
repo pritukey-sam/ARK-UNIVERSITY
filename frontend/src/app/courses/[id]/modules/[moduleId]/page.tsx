@@ -21,7 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { cn, formatDuration } from '@/lib/utils';
 
 declare global {
@@ -29,6 +29,78 @@ declare global {
     onYouTubeIframeAPIReady: () => void;
     YT: any;
   }
+}
+
+function VideoThumbnail({ video }: { video: any }) {
+  const thumbnailPlaceholder = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60`;
+  const [realUrl, setRealUrl] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState(false);
+
+  useEffect(() => {
+    if (!video || !video.video_url) return;
+
+    // Check if YouTube
+    const isYt = video.video_url.includes('youtube.com') || video.video_url.includes('youtu.be') || video.video_url.includes('youtube-nocookie.com');
+    if (isYt) {
+      setRealUrl(video.video_url);
+      return;
+    }
+
+    // Check if relative private storage key
+    const isRelative = !video.video_url.startsWith('http://') && !video.video_url.startsWith('https://');
+    if (isRelative) {
+      api.employee.getVideoUrl(video.id)
+        .then(res => {
+          if (res && res.video_url) {
+            setRealUrl(res.video_url);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to load signed URL for thumbnail:", err);
+          setVideoError(true);
+        });
+    } else {
+      setRealUrl(video.video_url);
+    }
+  }, [video]);
+
+  if (!video) {
+    return <img src={thumbnailPlaceholder} alt="Placeholder" className="w-full h-full object-cover" />;
+  }
+
+  // 1. YouTube Detection (maxresdefault with fallback to hqdefault)
+  const ytMatch = video.video_url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtu\.be\/|v\/|u\/\w\/)([^& \n<?#]+)/i);
+  if (ytMatch && ytMatch[1] && ytMatch[1].trim().length === 11) {
+    const ytId = ytMatch[1].trim();
+    return (
+      <img 
+        src={`https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`} 
+        alt={video.title} 
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
+        }}
+      />
+    );
+  }
+
+  // 2. Cloudflare Stream Detection
+  const cfMatch = video.video_url.match(/(?:cloudflarestream\.com|videodelivery\.net)\/([a-f0-9]{32})/i);
+  if (cfMatch && cfMatch[1]) {
+    const cfId = cfMatch[1];
+    return (
+      <img 
+        src={`https://videodelivery.net/${cfId}/thumbnails/thumbnail.jpg?time=2s&height=360`}
+        alt={video.title}
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          (e.target as HTMLImageElement).src = thumbnailPlaceholder;
+        }}
+      />
+    );
+  }
+
+  return <img src={thumbnailPlaceholder} alt={video.title} className="w-full h-full object-cover" />;
 }
 
 function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
@@ -112,17 +184,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
           setActiveModule(initialMod);
 
           if (initialMod?.videos?.length > 0) {
-            const modProg = progressMap[initialMod.id];
-            let initialVid = initialMod.videos[0];
-            if (modProg?.videos) {
-              for (const v of initialMod.videos) {
-                if (v && v.id) {
-                  const vp = modProg.videos.find((p: any) => p.video_id === v.id);
-                  if (!vp?.is_completed) { initialVid = v; break; }
-                }
-              }
-            }
-            setSelectedVideo(initialVid);
+            setSelectedVideo(null);
           }
         }
       }
@@ -385,24 +447,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     window.history.pushState(null, '', `/courses/${id}/modules/${mod.id}`);
     
     setActiveModule(mod);
-    if (mod.videos?.length > 0) {
-      const modProg = progressData[mod.id];
-      let initialVid = mod.videos[0];
-      if (modProg?.videos) {
-        for (const v of mod.videos) {
-          if (v && v.id) {
-            const vp = modProg.videos.find((p: any) => p.video_id === v.id);
-            if (!vp?.is_completed) {
-              initialVid = v;
-              break;
-            }
-          }
-        }
-      }
-      setSelectedVideo(initialVid);
-    } else {
-      setSelectedVideo(null);
-    }
+    setSelectedVideo(null);
     setActiveTab('video');
   };
 
@@ -440,6 +485,26 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     return !prevProg?.is_completed;
   };
   const isQuizLocked = () => assessmentLocked;
+
+  const handleFileDownload = (url: string, filename: string) => {
+    // Resolve same-origin proxy relative route if possible to avoid any local address blockages
+    let targetUrl = url;
+    if (url && url.includes('/uploads/')) {
+      const idx = url.indexOf('/uploads/');
+      targetUrl = url.substring(idx);
+    }
+    
+    // Append the download parameter so the backend knows to attach instead of preview
+    const downloadUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 'download=true';
+    
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename || '';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-white space-y-4">
@@ -482,10 +547,28 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
 
   return (
     <div className="min-h-screen bg-white font-sans text-[#111]">
+      {/* 1. CLEAN REFINED HEADER */}
       <header className="h-16 border-b border-gray-200 bg-white flex items-center px-6 sticky top-0 z-[100] shadow-sm">
-        <div className="flex items-center gap-6 w-full max-w-full mx-auto">
-          <BackNavigation />
+        <div className="flex items-center gap-6 w-full max-w-7xl mx-auto">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (selectedVideo !== null) {
+                setSelectedVideo(null);
+              } else {
+                router.back();
+              }
+            }}
+            className="flex items-center gap-2 h-auto px-0 py-1 text-sm font-medium text-[#6A6F73] hover:text-[#111] hover:bg-transparent transition-colors group"
+          >
+            <div className="flex items-center justify-center w-5 h-5 rounded-md bg-gray-50 border border-gray-100 group-hover:border-gray-200 transition-colors">
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </div>
+            <span>Back</span>
+          </Button>
+          
           <div className="flex-1" />
+          
           <div className="flex items-center gap-4">
             <div className="hidden md:flex flex-col items-end">
                <p className="text-[10px] font-bold text-gray-400 uppercase">Overall Progress</p>
@@ -500,375 +583,369 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         </div>
       </header>
 
-      <div className="flex flex-col lg:flex-row h-[calc(100vh-64px)] overflow-hidden">
-        <aside className="w-full lg:w-[380px] border-r border-gray-200 bg-white flex flex-col h-full overflow-hidden shadow-sm z-10">
-          <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/30">
-            <h3 className="text-[11px] font-bold text-[#111] uppercase tracking-wider">Course Curriculum</h3>
-            <Badge className="bg-gray-100 text-gray-600 border-none rounded-lg text-xs font-bold">{modules.length} Modules</Badge>
-          </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 bg-gray-50/20">
-            {modules.map((mod, mIdx) => {
-              const isLocked = isModuleLocked(mod);
-              const isActive = activeModule?.id === mod.id;
-              const prog = progressData[mod.id];
-              return (
-                <div key={mod.id} className="space-y-2">
-                   <button 
-                     onClick={() => !isLocked && handleModuleClick(mod)}
-                     disabled={isLocked}
-                     className={cn(
-                       "w-full flex items-center justify-between p-4 rounded-xl border transition-all text-left group",
-                       isActive ? "bg-white border-[#F26522] shadow-md ring-1 ring-[#F26522]/10" : "bg-white border-gray-100 hover:border-gray-300 shadow-sm",
-                       isLocked && "opacity-60 grayscale cursor-not-allowed bg-gray-50"
-                     )}
-                   >
-                     <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm transition-colors",
-                          isActive ? "bg-[#F26522] text-white" : "bg-gray-100 text-gray-500"
-                        )}>
-                          {isLocked ? <Lock className="w-4 h-4" /> : (mIdx + 1).toString().padStart(2, '0')}
+      {/* 2. MAIN FULL WIDTH WORKSPACE LAYOUT */}
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
+        
+        {/* Module Title Header */}
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-[#111] tracking-tight">{activeModule?.title || course?.title}</h1>
+        </div>
+
+        {/* 3. YOUTUBE-STYLE TABS */}
+        <div className="flex flex-wrap gap-2.5 pb-4 border-b border-gray-100">
+          {[
+            { id: 'video', label: 'Videos', icon: Video, locked: false },
+            { id: 'notes', label: 'Notes', icon: FileText, locked: false },
+            { id: 'task', label: 'Task', icon: Folder, locked: false },
+            { id: 'quiz', label: 'Quiz', icon: Trophy, locked: isQuizLocked() }
+          ].map(pill => {
+            const isActive = activeTab === pill.id;
+            return (
+              <button
+                key={pill.id}
+                onClick={() => {
+                  if (!pill.locked) {
+                    setActiveTab(pill.id);
+                    setSelectedVideo(null);
+                  } else {
+                    toast.error("Complete previous lessons to unlock quiz");
+                  }
+                }}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-full transition-all duration-200 border",
+                  isActive
+                    ? "bg-[#F26522] border-[#F26522] text-white shadow-md shadow-orange-100"
+                    : "bg-gray-100 border-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900",
+                  pill.locked && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <pill.icon className="w-3.5 h-3.5" />
+                {pill.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 4. MAIN CONTENT WORKSPACE */}
+        <div className="min-h-[500px] pt-4">
+          <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-[#F26522]" /></div>}>
+            
+            {/* ── VIDEO TAB CONTENT ── */}
+            {activeTab === 'video' && (
+              <>
+                {/* IF VIDEO SELECT PLAYER OPEN */}
+                {selectedVideo !== null ? (
+                  <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto">
+                    <div className="relative aspect-video bg-[#0a0a0a] rounded-2xl overflow-hidden shadow-lg border border-gray-250">
+                      {videoLoadingError ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 space-y-4">
+                          <AlertCircle className="w-12 h-12 opacity-30" />
+                          <p className="text-xs font-bold uppercase">{videoLoadingError}</p>
                         </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-[#111] uppercase tracking-tight line-clamp-1">{mod.title}</h4>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">
-                            {prog?.is_completed ? "Completed" : isLocked ? "Locked" : "In Progress"}
-                          </p>
+                      ) : !secureVideoUrl ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 space-y-6">
+                          <Loader2 className="w-10 h-10 animate-spin text-[#F26522]" />
+                          <p className="text-xs font-bold uppercase animate-pulse">Initializing Stream...</p>
                         </div>
-                     </div>
-                     {prog?.is_completed && <CheckCircle2 className="w-4 h-4 text-green-500" />}
-                   </button>
-                   
-                   {isActive && (
-                     <div className="pl-4 pr-1 py-1 space-y-1 animate-in slide-in-from-top-2 duration-300">
-                        {mod.videos?.filter((v: any) => v && v.id).map((vid: any, vIdx: number) => {
-                          const isVidLocked = isVideoLocked(vid);
-                          const isVidActive = selectedVideo?.id === vid.id;
-                          const vidProg = prog?.videos?.find((v: any) => v.video_id === vid.id);
+                      ) : getYouTubeId(secureVideoUrl) ? (
+                        <div id="player-container" className="w-full h-full">
+                          <div id="youtube-player-element" className="w-full h-full" />
+                        </div>
+                      ) : (
+                        <video 
+                          key={secureVideoUrl}
+                          src={secureVideoUrl}
+                          className="w-full h-full object-contain"
+                          controls
+                          autoPlay
+                          playsInline
+                          controlsList="nodownload"
+                          onEnded={() => handleVideoComplete(selectedVideo.id)}
+                        >
+                          Your browser does not support the video tag.
+                        </video>
+                      )}
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                      <div className="flex items-center justify-between gap-4">
+                        <h2 className="text-xl font-bold text-[#111]">{selectedVideo?.title}</h2>
+                        <div className="flex items-center gap-3">
+                          <Badge variant="outline" className="text-xs font-bold uppercase border-gray-200 text-gray-500 px-3 py-1">
+                            {formatDuration(selectedVideo?.duration_seconds || 0)}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="p-6 bg-gray-50 rounded-2xl border border-gray-150">
+                        <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-2">Lesson Overview</h4>
+                        <p className="text-sm text-gray-600 leading-relaxed max-w-4xl">
+                          {selectedVideo?.description || "In this lesson, we examine the technical implementations and conceptual frameworks required for this module."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* IF NO VIDEO IS SELECTED → SHOW YOUTUBE STYLE CARD GRID */
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-gray-150">
+                      <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Videos</h3>
+                      <Badge className="bg-gray-100 text-gray-600 border-none font-bold text-xs px-2.5 py-1 rounded-lg">
+                        {activeModule?.videos?.length || 0} Lessons
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+                      {activeModule?.videos && activeModule.videos.length > 0 ? (
+                        activeModule.videos.map((video: any, vIdx: number) => {
+                          const isLocked = isVideoLocked(video);
+                          const isCompleted = progressData[activeModule.id]?.videos?.find((v: any) => v.video_id === video.id)?.is_completed;
+                          
                           return (
-                            <button 
-                              key={vid.id}
-                              onClick={() => !isVidLocked && handleVideoSelect(vid)}
+                            <div 
+                              key={video.id}
+                              onClick={() => {
+                                if (isLocked) {
+                                  toast.error("Watch the previous video first");
+                                } else {
+                                  setSelectedVideo(video);
+                                }
+                              }}
                               className={cn(
-                                "w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors group relative",
-                                isVidActive ? "bg-white shadow-sm border border-orange-100" : "hover:bg-gray-50",
-                                isVidLocked && "opacity-50 cursor-not-allowed"
+                                "group cursor-pointer space-y-3",
+                                isLocked && "opacity-50 cursor-not-allowed"
                               )}
                             >
-                              {vidProg?.is_completed ? (
-                                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-                                  <Check className="w-3.5 h-3.5" />
+                              {/* Thumbnail Wrapper */}
+                              <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-gray-900 border border-gray-150 shadow-sm transition-transform duration-300 group-hover:scale-[1.02] group-hover:shadow-md">
+                                <VideoThumbnail video={video} />
+                                {/* Play / Lock Overlay */}
+                                <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 flex items-center justify-center transition-colors">
+                                  {isLocked ? (
+                                    <div className="w-11 h-11 rounded-full bg-black/60 shadow-md flex items-center justify-center">
+                                      <Lock className="w-4 h-4 text-white" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-11 h-11 rounded-full bg-white/90 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity transform scale-90 group-hover:scale-100 duration-300">
+                                      <Play className="w-3.5 h-3.5 fill-current text-[#F26522] ml-0.5" />
+                                    </div>
+                                  )}
                                 </div>
-                              ) : isVidLocked ? (
-                                <Lock className="w-4 h-4 text-gray-300" />
-                              ) : (
-                                <PlayCircle className={cn("w-5 h-5", isVidActive ? "text-[#F26522]" : "text-gray-400")} />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <p className={cn("text-[10px] font-bold uppercase truncate", isVidActive ? "text-[#111]" : "text-gray-500")}>
-                                  {vid.title}
-                                </p>
-                                <span className="text-[9px] font-bold text-gray-400 uppercase">{formatDuration(vid.duration_seconds || 0)}</span>
+                                {/* Duration Badge */}
+                                <div className="absolute bottom-2.5 right-2.5 bg-black/80 px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-wider">
+                                  {formatDuration(video.duration_seconds || 0)}
+                                </div>
+                                {/* Completed Status Indicator */}
+                                {isCompleted && (
+                                  <div className="absolute top-2.5 right-2.5 bg-green-500/90 text-white p-1 rounded-full shadow-sm">
+                                    <Check className="w-3.5 h-3.5" />
+                                  </div>
+                                )}
                               </div>
-                            </button>
+                              
+                              {/* Metadata */}
+                              <div className="flex gap-3 px-1 justify-between">
+                                <div className="flex gap-3 min-w-0">
+                                  <div className={cn(
+                                    "w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 uppercase",
+                                    isCompleted ? "bg-green-50 text-green-600" : "bg-[#F26522]/10 text-[#F26522]"
+                                  )}>
+                                    {isCompleted ? <Check className="w-3.5 h-3.5" /> : (vIdx + 1).toString().padStart(2, '0')}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <h4 className="font-semibold text-sm text-[#111] line-clamp-2 leading-snug group-hover:text-[#F26522] transition-colors uppercase tracking-tight">
+                                      {video.title}
+                                    </h4>
+                                    <p className="text-xs text-gray-500 line-clamp-1 mt-1 font-semibold uppercase tracking-wider">
+                                      Lesson {vIdx + 1}
+                                    </p>
+                                    <p className="text-xs text-[#6A6F73] line-clamp-2 mt-1 leading-relaxed">
+                                      {video.description || "In this lesson, we examine the technical implementations and conceptual frameworks required for this module."}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           );
-                        })}
-                        
-                        {/* Quiz Entry */}
-                        <button 
-                          onClick={() => !isQuizLocked() && setActiveTab('quiz')}
-                          className={cn(
-                            "w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors group",
-                            activeTab === 'quiz' ? "bg-white shadow-sm border border-orange-100" : "hover:bg-gray-50",
-                            isQuizLocked() && "opacity-50 cursor-not-allowed"
-                          )}
-                        >
-                           <div className={cn(
-                             "w-6 h-6 rounded-full flex items-center justify-center",
-                             prog?.quiz_completed ? "bg-green-100 text-green-600" : isQuizLocked() ? "text-gray-300" : "bg-orange-100 text-[#F26522]"
-                           )}>
-                              {prog?.quiz_completed ? <Check className="w-3.5 h-3.5" /> : isQuizLocked() ? <Lock className="w-3.5 h-3.5" /> : <Trophy className="w-3.5 h-3.5" />}
-                           </div>
-                           <div className="flex-1 min-w-0">
-                              <p className={cn("text-[10px] font-bold uppercase truncate", activeTab === 'quiz' ? "text-[#111]" : "text-gray-500")}>Final Assessment</p>
-                              <span className="text-[9px] font-bold text-gray-400 uppercase">Module Quiz</span>
-                           </div>
-                        </button>
-                     </div>
-                   )}
-                </div>
-              );
-            })}
-          </div>
-        </aside>
-
-        <main className="flex-1 bg-gray-50/50 overflow-y-auto custom-scrollbar flex flex-col">
-          <div className="flex-1 p-6 lg:p-10 max-w-6xl mx-auto w-full space-y-8">
-             <Card className="border-gray-200 shadow-xl rounded-3xl overflow-hidden bg-white border-t-4 border-t-[#F26522]">
-                <div className="flex border-b border-gray-100 bg-gray-50/20">
-                   {[
-                     { id: 'video', label: 'Lecture', icon: Video, locked: false },
-                     { id: 'notes', label: 'Notes', icon: FileText, locked: false },
-                     { id: 'task', label: 'Assignment', icon: Folder, locked: false },
-                     { id: 'quiz', label: 'Assessment', icon: Trophy, locked: isQuizLocked() }
-                   ].map(tab => (
-                     <button
-                       key={tab.id}
-                       onClick={() => !tab.locked && setActiveTab(tab.id)}
-                       className={cn(
-                         "flex-1 flex flex-col items-center justify-center gap-2 py-5 text-[10px] font-bold uppercase border-b-2 transition-all relative",
-                         activeTab === tab.id ? "border-[#F26522] text-[#F26522] bg-white" : "border-transparent text-gray-400 hover:text-gray-600 hover:bg-white/50",
-                         tab.locked && "opacity-40 cursor-not-allowed"
-                       )}
-                     >
-                       <tab.icon className="w-5 h-5" />
-                       {tab.label}
-                       {tab.locked && <Lock className="w-3 h-3 absolute top-3 right-3 opacity-50" />}
-                     </button>
-                   ))}
-                </div>
-
-                <div className="p-6 md:p-10">
-                  <Suspense fallback={<div className="py-20 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-[#F26522]" /></div>}>
-                    {activeTab === 'video' && (
-                      <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                        <div className="relative aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-gray-100 group">
-                          {!selectedVideo ? (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 space-y-4">
-                              <PlayCircle className="w-20 h-20 opacity-10" />
-                              <p className="text-xs font-bold uppercase tracking-widest opacity-40">Select a lesson to begin</p>
-                            </div>
-                          ) : videoLoadingError ? (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 p-12 text-center bg-gray-900">
-                              <AlertCircle className="w-16 h-16 mb-4 opacity-50" />
-                              <p className="text-base font-bold uppercase tracking-tight">{videoLoadingError}</p>
-                              <Button variant="outline" onClick={() => window.location.reload()} className="mt-6 border-red-500/30 text-red-400 hover:bg-red-500/10">Retry Connection</Button>
-                            </div>
-                          ) : !secureVideoUrl ? (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 space-y-6 bg-gray-900">
-                              <Loader2 className="w-12 h-12 animate-spin text-[#F26522]" />
-                              <p className="text-xs font-bold uppercase tracking-widest animate-pulse">Establishing secure link...</p>
-                            </div>
-                          ) : getYouTubeId(secureVideoUrl) ? (
-                            <div id="youtube-player-element" className="w-full h-full" />
-                          ) : (
-                            <video 
-                              key={secureVideoUrl}
-                              src={secureVideoUrl}
-                              className="w-full h-full object-contain"
-                              controls
-                              autoPlay
-                              playsInline
-                              controlsList="nodownload"
-                              onEnded={() => handleVideoComplete(selectedVideo.id)}
-                            />
-                          )}
+                        })
+                      ) : (
+                        <div className="col-span-full py-24 text-center space-y-4 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-200">
+                          <Video className="w-16 h-16 mx-auto text-gray-200" />
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No video lectures found for this module</p>
                         </div>
-                        {selectedVideo && (
-                          <div className="space-y-6">
-                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                               <div className="space-y-1">
-                                 <h2 className="text-3xl font-black text-[#111] tracking-tight">{selectedVideo.title}</h2>
-                                 <div className="flex items-center gap-3">
-                                    <Badge className="bg-orange-50 text-[#F26522] border-none text-[10px] font-bold uppercase tracking-wider px-3 py-1">
-                                      Lesson {activeModule.videos.indexOf(selectedVideo) + 1}
-                                    </Badge>
-                                    <div className="h-4 w-px bg-gray-200" />
-                                    <span className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
-                                       <Clock className="w-3.5 h-3.5" /> {formatDuration(selectedVideo.duration_seconds || 0)}
-                                    </span>
-                                 </div>
-                               </div>
-                               <Button variant="outline" className="rounded-xl border-gray-200 font-bold text-[10px] uppercase h-11 px-6 tracking-widest gap-2">
-                                  <Bookmark className="w-4 h-4" /> Save for later
-                               </Button>
-                             </div>
-                             <div className="p-8 bg-gray-50/50 rounded-2xl border border-gray-100">
-                                <h4 className="text-xs font-black text-[#111] uppercase tracking-widest mb-4">Lesson Overview</h4>
-                                <p className="text-base text-gray-600 leading-relaxed max-w-4xl opacity-80">
-                                  {selectedVideo.description || "Take a deep dive into the core concepts of this lesson. We'll explore the theoretical foundations and practical applications necessary for mastering this module."}
-                                </p>
-                             </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── NOTES TAB CONTENT ── */}
+            {activeTab === 'notes' && (
+              <div className="space-y-10 animate-in fade-in duration-500">
+                <div className="flex items-center justify-between pb-4 border-b border-gray-150">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Notes & Resources</h3>
+                    <p className="text-xs text-gray-500">Study materials provided for this module</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {!notesDone && activeModule?.notes?.length > 0 && (
+                      <Button 
+                        onClick={handleMarkNotesRead}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider h-10 px-5 rounded-xl shadow-sm"
+                      >
+                        <Check className="w-4 h-4 mr-1.5" /> Mark as Read
+                      </Button>
+                    )}
+                    {notesDone && (
+                      <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4" /> Notes Read
+                      </Badge>
+                    )}
+                    <Badge className="bg-blue-50 text-blue-600 border-none font-bold text-xs px-3 py-1.5 rounded-xl">
+                      {activeModule?.notes?.length || 0} Files
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {activeModule?.notes && activeModule.notes.length > 0 ? (
+                    activeModule.notes.map((note: any, i: number) => (
+                      <div key={note.id} className="p-6 border border-gray-150 rounded-2xl hover:border-blue-200 hover:shadow-md transition-all bg-white flex flex-col justify-between gap-6 group">
+                        <div className="flex items-start justify-between">
+                          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <FileArchive className="w-6 h-6" />
+                          </div>
+                          <Badge variant="outline" className="border-gray-200 text-gray-400 font-bold text-[9px] uppercase tracking-wider">
+                            {note.file_type?.toUpperCase() || 'PDF'}
+                          </Badge>
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-[#111] line-clamp-1">{note.file_name || `Study Material ${i + 1}`}</h4>
+                          <p className="text-xs text-gray-400 font-bold uppercase mt-1">Resource Guide</p>
+                        </div>
+                        <div className="flex items-center gap-3 pt-2">
+                          <a href={note.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1 rounded-xl font-bold text-xs uppercase h-10 border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 bg-white")}>Preview</a>
+                          <a href={note.file_url} download className={cn(buttonVariants({ variant: "outline", size: "icon" }), "w-10 h-10 rounded-xl border-gray-200 text-gray-500 hover:bg-blue-50 hover:text-blue-600 bg-white")}>
+                            <Download className="w-4 h-4" />
+                          </a>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full py-24 text-center space-y-4 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-200">
+                      <FileText className="w-16 h-16 mx-auto text-gray-200" />
+                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No documentation found for this module</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── TASK TAB CONTENT ── */}
+            {activeTab === 'task' && (
+              <div className="space-y-8 animate-in fade-in duration-500">
+                <div className="flex items-center justify-between pb-4 border-b border-gray-150">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Assignments</h3>
+                    <p className="text-xs text-gray-500">Submit deliverables required for course completion</p>
+                  </div>
+                  {progressData[activeModule?.id || 0]?.assignment_completed ? (
+                    <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-xs px-3.5 py-1.5 rounded-full flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> Submitted
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-orange-50 text-orange-600 border-none font-bold text-xs px-3.5 py-1.5 rounded-full">Pending Submission</Badge>
+                  )}
+                </div>
+
+                {activeModule?.assignments && activeModule.assignments.length > 0 ? (
+                  activeModule.assignments.map((task: any) => (
+                    <div key={task.id} className="space-y-6">
+                      <Card className="p-8 border border-gray-150 shadow-sm rounded-2xl bg-white relative overflow-hidden">
+                        <div className="flex flex-col md:flex-row items-start gap-6">
+                          <div className="w-16 h-16 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
+                            <Bookmark className="w-8 h-8" />
+                          </div>
+                          <div className="flex-1 space-y-4">
+                            <div>
+                              <h4 className="text-xl font-bold text-[#111]">{task.title}</h4>
+                              <p className="text-xs text-gray-400 font-bold uppercase mt-1 tracking-wider">Instructions & Deliverables</p>
+                            </div>
+                            <div className="p-5 bg-gray-50/50 rounded-xl text-sm text-gray-600 leading-relaxed border border-gray-150">
+                              {task.description || "Submit your completed project files here. Ensure that all standard deliverables have been formatted before uploading."}
+                            </div>
+                            <div className="flex flex-wrap gap-3">
+                              <a href={task.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline" }), "rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-gray-600 flex items-center gap-1.5 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all bg-white")}>
+                                <Eye className="w-4 h-4" /> View Guide
+                              </a>
+                              <Button 
+                                variant="outline" 
+                                onClick={() => handleFileDownload(task.file_url, task.title + ".pdf")}
+                                className="rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-gray-600 flex items-center gap-1.5 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all bg-white"
+                              >
+                                <Download className="w-4 h-4" /> Download Resources
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                      
+                      <SubmissionZone moduleId={activeModule.id} onSubmitted={() => fetchCourseData(true)} />
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full py-24 text-center space-y-4 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-200">
+                    <Folder className="w-16 h-16 mx-auto text-gray-200" />
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No assignments requested for this module</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── QUIZ TAB CONTENT ── */}
+            {activeTab === 'quiz' && (
+              <div className="animate-in fade-in duration-500">
+                {isQuizLocked() ? (
+                  <div className="py-20 text-center space-y-6 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-200 max-w-xl mx-auto">
+                    <div className="w-16 h-16 rounded-full bg-white shadow-sm flex items-center justify-center mx-auto text-gray-300 border border-gray-150">
+                      <Lock className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-2 px-6">
+                      <h3 className="text-lg font-bold text-[#111]">Assessment Locked</h3>
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">
+                        Complete all previous lectures, notes, and assignments to unlock the final quiz.
+                      </p>
+                      <div className="flex flex-col gap-1.5 max-w-xs mx-auto pt-4 text-left">
+                        <div className={cn("flex items-center gap-2 text-[10px] font-bold uppercase", videosDone ? "text-green-600" : "text-gray-400")}>
+                          {videosDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                          Videos watched ({completedVideos}/{totalVideos})
+                        </div>
+                        <div className={cn("flex items-center gap-2 text-[10px] font-bold uppercase", notesDone ? "text-green-600" : "text-gray-400")}>
+                          {notesDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                          Study notes read
+                        </div>
+                        {activeModule?.assignments?.length > 0 && (
+                          <div className={cn("flex items-center gap-2 text-[10px] font-bold uppercase", assignmentDone ? "text-green-600" : "text-gray-400")}>
+                            {assignmentDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                            Practical assignment submitted
                           </div>
                         )}
                       </div>
-                    )}
+                    </div>
+                  </div>
+                ) : activeModule?.quizzes && activeModule.quizzes.length > 0 ? (
+                  <QuizTaker quizId={activeModule.quizzes[0].id} onComplete={() => fetchCourseData(true)} />
+                ) : (
+                  <div className="py-20 text-center space-y-4 max-w-xl mx-auto">
+                    <Trophy className="w-16 h-16 mx-auto text-gray-200" />
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No assessment configured for this module</p>
+                  </div>
+                )}
+              </div>
+            )}
 
-                    {activeTab === 'notes' && (
-                       <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                         <div className="flex items-center justify-between pb-8 border-b border-gray-100">
-                            <div>
-                               <h3 className="text-2xl font-black text-[#111] tracking-tight">Study Materials</h3>
-                               <p className="text-sm text-gray-400 font-bold uppercase mt-1">Reference Documentation & Resources</p>
-                            </div>
-                            <div className="flex items-center gap-4">
-                               {!notesDone && activeModule.notes?.length > 0 && (
-                                 <Button 
-                                   onClick={handleMarkNotesRead}
-                                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase tracking-widest h-10 px-6 rounded-xl shadow-lg shadow-emerald-100"
-                                 >
-                                   <Check className="w-4 h-4 mr-2" /> Mark as Read
-                                 </Button>
-                               )}
-                               {notesDone && (
-                                 <Badge className="bg-emerald-50 text-emerald-600 border-none font-bold text-[10px] uppercase px-4 py-2 rounded-xl flex items-center gap-2">
-                                   <CheckCircle2 className="w-4 h-4" /> Completed
-                                 </Badge>
-                               )}
-                               <Badge className="bg-blue-50 text-blue-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-xl">
-                                  {activeModule.notes?.length || 0} Assets
-                               </Badge>
-                            </div>
-                         </div>
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                           {activeModule.notes?.length > 0 ? (
-                             activeModule.notes.map((note: any, i: number) => (
-                               <div key={note.id} className="p-8 border border-gray-100 rounded-3xl hover:border-blue-300 hover:shadow-xl transition-all bg-white flex flex-col gap-6 group">
-                                  <div className="flex items-start justify-between">
-                                     <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                        <FileArchive className="w-8 h-8" />
-                                     </div>
-                                     <Badge variant="outline" className="border-gray-200 text-gray-400 font-bold text-[9px] uppercase tracking-widest">
-                                        {note.file_type?.toUpperCase() || 'PDF'}
-                                     </Badge>
-                                  </div>
-                                  <div>
-                                     <h4 className="text-lg font-black text-[#111]">Document Resource {i + 1}</h4>
-                                     <p className="text-xs text-gray-400 font-bold uppercase mt-1 tracking-tight">Technical Reference • 2.4 MB</p>
-                                  </div>
-                                  <div className="flex items-center gap-3 pt-2">
-                                     <a href={note.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1 rounded-xl font-bold text-[10px] uppercase h-12 border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200")}>Preview</a>
-                                     <a href={note.file_url} download className={cn(buttonVariants({ variant: "outline", size: "icon" }), "w-12 h-12 rounded-xl border-gray-200 text-gray-500 hover:bg-blue-50 hover:text-blue-600")}>
-                                        <Download className="w-4 h-4" />
-                                     </a>
-                                  </div>
-                               </div>
-                             ))
-                           ) : (
-                             <div className="col-span-full py-24 text-center space-y-4 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-200">
-                                <FileText className="w-16 h-16 mx-auto text-gray-200" />
-                                <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No documentation found for this module</p>
-                             </div>
-                           )}
-                         </div>
-                       </div>
-                    )}
+          </Suspense>
+        </div>
 
-                    {activeTab === 'task' && (
-                       <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                          <div className="flex items-center justify-between pb-8 border-b border-gray-100">
-                             <div>
-                                <h3 className="text-2xl font-black text-[#111] tracking-tight">Assignment Lab</h3>
-                                <p className="text-sm text-gray-400 font-bold uppercase mt-1">Practical Exercises & Submissions</p>
-                             </div>
-                             {progressData[activeModule.id]?.assignment_completed ? (
-                               <Badge className="bg-emerald-50 text-emerald-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full flex items-center gap-2">
-                                 <CheckCircle2 className="w-4 h-4" /> Submitted
-                               </Badge>
-                             ) : (
-                               <Badge className="bg-orange-50 text-orange-600 border-none text-[10px] font-bold uppercase px-4 py-2 rounded-full">Action Required</Badge>
-                             )}
-                          </div>
-                          {activeModule.assignments?.map((task: any) => (
-                             <div key={task.id} className="space-y-8">
-                                <Card className="p-10 border border-gray-100 shadow-xl rounded-3xl bg-white relative overflow-hidden group">
-                                   <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/30 rounded-full -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-700" />
-                                   <div className="flex flex-col md:flex-row items-start gap-8 relative z-10">
-                                      <div className="w-20 h-20 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 shadow-sm border border-emerald-100">
-                                         <Bookmark className="w-10 h-10" />
-                                      </div>
-                                      <div className="flex-1 space-y-6">
-                                         <div>
-                                            <h4 className="text-2xl font-black text-[#111] tracking-tight">{task.title}</h4>
-                                            <p className="text-xs font-bold text-gray-400 uppercase mt-2 tracking-widest">Instructions & Deliverables</p>
-                                         </div>
-                                         <div className="p-6 bg-gray-50/50 rounded-2xl text-base text-gray-600 leading-relaxed border border-gray-100">
-                                            {task.description || "Submit your project files here. Please ensure all requirements listed in the guide are met before uploading your final work."}
-                                         </div>
-                                         <div className="flex flex-wrap gap-4">
-                                            <a href={task.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline" }), "rounded-xl h-14 px-8 font-bold text-[11px] uppercase border-gray-200 text-gray-600 flex items-center gap-2 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all")}>
-                                              <Eye className="w-5 h-5" /> View Instructions
-                                            </a>
-                                            <a href={task.file_url} download className={cn(buttonVariants({ variant: "outline" }), "rounded-xl h-14 px-8 font-bold text-[11px] uppercase border-gray-200 text-gray-600 flex items-center gap-2 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all")}>
-                                              <Download className="w-5 h-5" /> Download Resources
-                                            </a>
-                                         </div>
-                                      </div>
-                                   </div>
-                                </Card>
-                                
-                                <SubmissionZone moduleId={activeModule.id} onSubmitted={() => fetchCourseData(true)} />
-                             </div>
-                          ))}
-                       </div>
-                    )}
-
-                    {activeTab === 'quiz' && (
-                       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                          {isQuizLocked() ? (
-                            <div className="py-24 text-center space-y-8 bg-gray-50/50 rounded-[3rem] border-2 border-dashed border-gray-200">
-                               <div className="w-24 h-24 rounded-full bg-white shadow-xl flex items-center justify-center mx-auto text-gray-200 border border-gray-100">
-                                  <Lock className="w-10 h-10" />
-                               </div>
-                               <div className="space-y-3 px-6">
-                                  <h3 className="text-2xl font-black text-[#111] tracking-tight">Assessment Locked</h3>
-                                  <div className="max-w-sm mx-auto space-y-4">
-                                    <p className="text-sm text-gray-400 font-bold uppercase tracking-tight opacity-70">
-                                      To unlock this assessment, please complete:
-                                    </p>
-                                    <div className="flex flex-col gap-2">
-                                      <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", videosDone ? "text-emerald-600" : "text-gray-400")}>
-                                        {videosDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                                        All Video Lectures
-                                      </div>
-                                      <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", notesDone ? "text-emerald-600" : "text-gray-400")}>
-                                        {notesDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                                        Study Materials
-                                      </div>
-                                      {activeModule.assignments?.length > 0 && (
-                                        <div className={cn("flex items-center gap-2 text-[10px] font-black uppercase", assignmentDone ? "text-emerald-600" : "text-gray-400")}>
-                                          {assignmentDone ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
-                                          Practical Assignment
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <Button onClick={() => setActiveTab('video')} variant="outline" className="rounded-full border-gray-200 font-bold text-[10px] uppercase tracking-widest px-8">Return to Lectures</Button>
-                                </div>
-                            </div>
-                          ) : activeModule.quizzes?.length > 0 ? (
-                            <div className="space-y-8">
-                               {activeModule.quizzes.map((quiz: any) => (
-                                 <div key={quiz.id} className="text-center py-24 space-y-10 bg-white rounded-[3rem] border border-gray-100 shadow-2xl">
-                                    <div className="w-24 h-24 rounded-3xl bg-orange-50 text-[#F26522] flex items-center justify-center mx-auto shadow-sm border border-orange-100">
-                                       <Trophy className="w-12 h-12" />
-                                    </div>
-                                    <div className="space-y-2">
-                                       <h3 className="text-4xl font-black text-[#111] tracking-tight">{quiz.title}</h3>
-                                       <p className="text-sm text-gray-400 font-bold uppercase tracking-widest">Final Module Assessment</p>
-                                    </div>
-                                    <Button 
-                                       onClick={() => router.push(`/courses/${id}/modules/${moduleId}/assessment`)} 
-                                       className="w-full max-w-md bg-[#111] hover:bg-black text-white h-20 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all"
-                                    >
-                                       BEGIN ASSESSMENT
-                                    </Button>
-                                 </div>
-                               ))}
-                            </div>
-                          ) : (
-                            <div className="py-24 text-center space-y-4">
-                               <Trophy className="w-16 h-16 mx-auto text-gray-200" />
-                               <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No assessment configured for this module</p>
-                            </div>
-                          )}
-                       </div>
-                    )}
-                  </Suspense>
-                </div>
-             </Card>
-          </div>
-        </main>
       </div>
     </div>
   );
@@ -930,6 +1007,11 @@ function SubmissionZone({ moduleId, onSubmitted }: { moduleId: number, onSubmitt
 }
 
 function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => void }) {
+  const router = useRouter();
+  const params = useParams();
+  const id = params?.id as string;
+  const moduleId = params?.moduleId as string;
+
   const [quiz, setQuiz] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [quizState, setQuizState] = useState<'idle' | 'active' | 'result'>('idle');

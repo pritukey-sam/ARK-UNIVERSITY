@@ -313,6 +313,7 @@ class UserOut(BaseModel):
     company_id: Optional[int] = None
     company_name: Optional[str] = None
     employee_id: Optional[str] = None
+    designation: Optional[str] = None
     plan_type: Optional[str] = "free"
     avatar_url: Optional[str] = None
     created_at: Optional[datetime] = None

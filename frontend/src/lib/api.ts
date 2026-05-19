@@ -65,6 +65,7 @@ export const api = {
  updateCourse: (courseId: number, data: any) => api.request(`/courses/${courseId}`, { method: 'PUT', body: JSON.stringify(data) }),
  deleteCourse: (courseId: number) => api.request(`/courses/${courseId}`, { method: 'DELETE' }),
  getUsers: () => api.request('/users'),
+ getNextUserId: (role: string) => api.request(`/users/next-id?role=${role}`),
  deleteUser: (userId: number) => api.request(`/users/${userId}`, { method: 'DELETE' }),
  createModule: (courseId: number, data: any) => api.request(`/courses/${courseId}/modules`, { method: 'POST', body: JSON.stringify(data) }),
  updateModule: (moduleId: number, data: any) => api.request(`/courses/modules/${moduleId}`, { method: 'PUT', body: JSON.stringify(data) }),

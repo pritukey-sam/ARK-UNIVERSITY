@@ -32,12 +32,14 @@ class CreateUserRequest(BaseModel):
     name: str
     role: str
     department: Optional[str] = "Engineering"
+    designation: Optional[str] = None
     employee_id: Optional[str] = None
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
+    designation: Optional[str] = None
     employee_id: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -175,7 +177,8 @@ def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_
             avatar_initials=initials,
             company_id=company_id,
             employee_id=body.employee_id or emp_id,
-            department=body.department or "Engineering"
+            department=body.department or "Engineering",
+            designation=body.designation
         )
         db.add(user)
         
@@ -246,6 +249,12 @@ def update_course(course_id: int, body: CourseUpdate, db: Session = Depends(get_
     db.refresh(course)
     return course
 
+@router.get("/users/next-id")
+def get_next_user_id(role: str = "employee", db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr", "super_admin"]))):
+    company_id = current_user.get("company_id")
+    emp_id = generate_user_id(db, company_id, role)
+    return {"employee_id": emp_id}
+
 @router.get("/users")
 def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr", "super_admin"]))):
     company_id = current_user.get("company_id")
@@ -296,6 +305,7 @@ def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(
             "email": u.email,
             "role": u.role,
             "department": u.department or "Engineering",
+            "designation": u.designation,
             "active_courses_count": active_courses_count,
             "joined_by": joined_by_name,
             "employee_id": u.employee_id,
@@ -353,6 +363,7 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), c
     if body.name: user.name = body.name
     if body.role: user.role = body.role
     if body.department: user.department = body.department
+    if body.designation: user.designation = body.designation
     if body.employee_id: user.employee_id = body.employee_id
     if body.is_active is not None: user.is_active = body.is_active
     
@@ -473,6 +484,7 @@ def get_user_details(user_id: int, db: Session = Depends(get_db), current_user=D
             "role": user.role,
             "employee_id": user.employee_id,
             "department": user.department or "Engineering",
+            "designation": user.designation,
             "avatar_initials": user.avatar_initials,
             "created_at": user.created_at,
             "last_login_at": user.last_login_at,
@@ -540,6 +552,30 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
             details=f"Extended deadline for '{course.title}' (User: {user.name})"
         ))
         
+        # Also ensure approved AssignmentRequest exists
+        from models import AssignmentRequest
+        req = db.query(AssignmentRequest).filter(
+            AssignmentRequest.user_id == body.employee_id,
+            AssignmentRequest.course_id == body.course_id
+        ).first()
+        if req:
+            req.status = "approved"
+            req.admin_id = current_user["id"]
+            req.approved_at = datetime.now(timezone.utc)
+            req.due_date = new_due
+        else:
+            req = AssignmentRequest(
+                hr_id=current_user["id"],
+                user_id=body.employee_id,
+                course_id=body.course_id,
+                status="approved",
+                due_date=new_due,
+                admin_id=current_user["id"],
+                approved_at=datetime.now(timezone.utc),
+                note="Direct assignment from Admin Dashboard"
+            )
+            db.add(req)
+        
         db.commit()
         return {"message": f"Deadline for '{course.title}' extended to {existing.due_date.strftime('%d %b %Y')}"}
 
@@ -550,6 +586,30 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
         due_date=due_date
     )
     db.add(enrollment)
+    
+    # Also create the approved AssignmentRequest so it appears in the listing/history
+    from models import AssignmentRequest
+    req = db.query(AssignmentRequest).filter(
+        AssignmentRequest.user_id == body.employee_id,
+        AssignmentRequest.course_id == body.course_id
+    ).first()
+    if req:
+        req.status = "approved"
+        req.admin_id = current_user["id"]
+        req.approved_at = datetime.now(timezone.utc)
+        req.due_date = due_date
+    else:
+        req = AssignmentRequest(
+            hr_id=current_user["id"],
+            user_id=body.employee_id,
+            course_id=body.course_id,
+            status="approved",
+            due_date=due_date,
+            admin_id=current_user["id"],
+            approved_at=datetime.now(timezone.utc),
+            note="Direct assignment from Admin Dashboard"
+        )
+        db.add(req)
     
     # Log Activity
     log = ActivityLog(
@@ -580,12 +640,26 @@ def global_search(q: str = Query(..., min_length=1), db: Session = Depends(get_d
         course_query = course_query.filter(Course.company_id == company_id)
     
     courses = course_query.limit(5).all()
+
+    # Search Modules
+    module_query = db.query(Module).join(Course, Module.course_id == Course.id).filter(
+        Course.is_active == True,
+        (Module.title.ilike(search_term)) | (Module.description.ilike(search_term))
+    )
+    if company_id:
+        module_query = module_query.filter(Course.company_id == company_id)
+        
+    modules = module_query.limit(5).all()
     
     # Search Users (Admin/HR/SuperAdmin)
     users = []
     if current_user["role"] in ["admin", "hr", "super_admin"]:
         user_query = db.query(User).filter(
-            (User.name.ilike(search_term)) | (User.email.ilike(search_term))
+            User.is_active == True,
+            (User.name.ilike(search_term)) | 
+            (User.email.ilike(search_term)) | 
+            (User.employee_id.ilike(search_term)) | 
+            (User.role.ilike(search_term))
         )
         if company_id:
             user_query = user_query.filter(User.company_id == company_id)
@@ -600,7 +674,8 @@ def global_search(q: str = Query(..., min_length=1), db: Session = Depends(get_d
         
     return {
         "courses": [{"id": c.id, "title": c.title, "type": "course"} for c in courses],
-        "users": [{"id": u.id, "name": u.name, "role": u.role, "type": "user"} for u in users]
+        "modules": [{"id": m.id, "title": m.title, "course_id": m.course_id, "type": "module"} for m in modules],
+        "users": [{"id": u.id, "name": u.name, "role": u.role, "email": u.email, "employee_id": u.employee_id, "type": "user"} for u in users]
     }
 
 # ── HR ─────────────────────────────────────────────────────────────────────────
@@ -781,13 +856,71 @@ def get_stats(db: Session = Depends(get_db), current_user=Depends(get_current_us
             total_courses = course_q.count()
             total_enrollments = enrollment_q.count()
             
-            completed = enrollment_q.filter(Enrollment.is_completed == True).count()
+            # Compute completions from UserProgress data (resilient to stale enrollment flags)
+            all_enrollments = enrollment_q.all()
+            completed = 0
+            if all_enrollments:
+                module_counts = dict(db.query(Module.course_id, func.count(Module.id)).filter(Module.is_active == True).group_by(Module.course_id).all())
+                completed_counts = db.query(
+                    UserProgress.user_id, UserProgress.course_id, func.count(UserProgress.id)
+                ).filter(UserProgress.is_completed == True).group_by(UserProgress.user_id, UserProgress.course_id).all()
+                comp_map = {(r[0], r[1]): r[2] for r in completed_counts}
+                
+                for e in all_enrollments:
+                    total_m = module_counts.get(e.course_id, 0)
+                    done_m = comp_map.get((e.user_id, e.course_id), 0)
+                    if total_m > 0 and done_m >= total_m:
+                        completed += 1
+                        # Repair stale enrollment flag
+                        if not e.is_completed:
+                            e.is_completed = True
+                            e.completed_at = datetime.now(timezone.utc)
+                if completed > 0:
+                    try:
+                        db.commit()
+                    except:
+                        db.rollback()
+            
             overdue = enrollment_q.filter(Enrollment.is_completed == False, Enrollment.due_date < now).count()
             near_expiry = enrollment_q.filter(
                 Enrollment.is_completed == False, 
                 Enrollment.due_date >= now, 
                 Enrollment.due_date <= now + timedelta(days=7)
             ).count()
+            
+            # Dynamic insight calculations:
+            # 1. User Growth: Current calendar month signups vs users registered before
+            first_of_current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            current_month_users_count = user_q.filter(User.created_at >= first_of_current_month).count()
+            users_before_this_month = user_q.filter(User.created_at < first_of_current_month).count()
+            if users_before_this_month > 0:
+                growth_pct = round((current_month_users_count / users_before_this_month) * 100)
+                user_growth_trend = f"+{growth_pct}% this month" if growth_pct >= 0 else f"{growth_pct}% this month"
+            else:
+                user_growth_trend = f"+{current_month_users_count} new this month" if current_month_users_count > 0 else "0% this month"
+
+            # 2. Dynamic Course growth: New courses created within the last 30 days
+            thirty_days_ago = now - timedelta(days=30)
+            new_courses_count = course_q.filter(Course.created_at >= thirty_days_ago).count()
+            course_trend = f"+{new_courses_count} new courses"
+
+            # 3. Dynamic Engagement Rate: Ratio of enrolled users with active progress records
+            engaged_query = db.query(UserProgress.user_id, UserProgress.course_id).join(User, UserProgress.user_id == User.id).filter(User.is_active == True)
+            if company_id:
+                engaged_query = engaged_query.filter(User.company_id == company_id)
+            engaged_enrollments = engaged_query.distinct().count()
+            if total_enrollments > 0:
+                engagement_pct = min(100, round((engaged_enrollments / total_enrollments) * 100))
+            else:
+                engagement_pct = 0
+            engagement_trend = f"{engagement_pct}% engagement"
+
+            # 4. Success Rate: Ratio of completed enrollments to total enrollments
+            if total_enrollments > 0:
+                success_pct = round((completed / total_enrollments) * 100)
+            else:
+                success_pct = 0
+            success_trend = f"{success_pct}% success rate"
             
             stats = {
                 "totalUsers": total_users,
@@ -796,7 +929,11 @@ def get_stats(db: Session = Depends(get_db), current_user=Depends(get_current_us
                 "totalAssignments": total_enrollments, # Alias for frontend compatibility
                 "completedAssignments": completed,
                 "overdueAssignments": overdue,
-                "nearExpiryAssignments": near_expiry
+                "nearExpiryAssignments": near_expiry,
+                "userGrowthTrend": user_growth_trend,
+                "courseTrend": course_trend,
+                "engagementTrend": engagement_trend,
+                "successTrend": success_trend
             }
         return stats
     except Exception as e:

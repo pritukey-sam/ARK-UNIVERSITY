@@ -118,7 +118,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { label: 'Courses', icon: BookOpen, path: '/courses', roles: ['admin', 'employee', 'hr'] },
     { label: 'Companies', icon: Building2, path: '/super-admin/companies', roles: ['super_admin'] },
     { label: 'Users', icon: Users, path: '/users', roles: ['admin', 'hr'] },
-    { label: 'Assignments', icon: FileText, path: '/assignments', roles: ['hr', 'admin'] },
+    { label: 'Assign Courses', icon: FileText, path: '/assignments', roles: ['hr', 'admin'] },
     { label: 'Settings', icon: Settings, path: '/profile', roles: ['super_admin', 'admin', 'employee', 'hr'] },
   ];
 
@@ -131,13 +131,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         "hidden lg:flex flex-col border-r border-[#eee] bg-white transition-all duration-300 ease-in-out h-full",
         isCollapsed ? "w-20" : "w-64"
       )}>
-        <div className={cn("p-6 border-b border-[#eee] flex items-center transition-all duration-300", isCollapsed ? "justify-center px-4" : "justify-between")}>
+        <div className={cn("p-6 border-b border-[#eee] flex items-center transition-all duration-300", isCollapsed ? "flex-col gap-4 justify-center px-4" : "justify-between")}>
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="w-8 h-8 rounded bg-[#F26522] flex items-center justify-center shrink-0">
               <span className="text-white font-bold text-lg">L</span>
             </div>
             {!isCollapsed && <span className="text-xl font-bold text-[#111] whitespace-nowrap">Lumina LMS</span>}
           </div>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-[#6A6F73] hover:text-[#111]" 
+            onClick={toggleSidebar}
+          >
+            {isCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+          </Button>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
           {filteredNav.map((item) => (
@@ -221,15 +229,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </nav>
               </SheetContent>
             </Sheet>
-            
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="hidden lg:flex text-[#6A6F73] hover:text-[#111]" 
-              onClick={toggleSidebar}
-            >
-              {isCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
-            </Button>
 
           </div>
 
@@ -245,21 +244,85 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 className="w-full bg-gray-50/50 border border-[#eee] rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-[#F26522] transition-colors"
               />
               {searchOpen && (
-                <div className="absolute top-full mt-1 left-0 w-full bg-white border border-[#eee] rounded-lg shadow-lg z-[200] overflow-hidden">
+                <div className="absolute top-full mt-2 left-0 w-full bg-white border border-[#eee] rounded-xl shadow-xl z-[200] overflow-hidden max-h-[450px] overflow-y-auto custom-scrollbar">
                   {searchLoading ? (
                     <div className="p-4 text-center text-sm text-[#6A6F73]">Searching...</div>
-                  ) : searchResults?.courses.length > 0 ? (
-                    searchResults.courses.map((c: any) => (
-                      <button 
-                        key={c.id} 
-                        onClick={() => { router.push(`/courses/${c.id}`); setSearchOpen(false); setSearchQuery(''); }}
-                        className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 border-b border-[#eee] last:border-0"
-                      >
-                        <p className="font-bold text-[#111]">{c.title}</p>
-                      </button>
-                    ))
+                  ) : ((searchResults?.courses?.length > 0) || (searchResults?.modules?.length > 0) || (searchResults?.users?.length > 0)) ? (
+                    <div className="divide-y divide-[#eee]">
+                      {/* Courses */}
+                      {searchResults?.courses?.length > 0 && (
+                        <div className="p-2">
+                          <p className="px-3 py-1.5 text-[10px] font-bold text-[#6A6F73] uppercase tracking-wider">Courses</p>
+                          <div className="space-y-0.5">
+                            {searchResults.courses.map((c: any) => (
+                              <button 
+                                key={`course-${c.id}`} 
+                                onClick={() => { router.push(`/courses/${c.id}`); setSearchOpen(false); setSearchQuery(''); }}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-[#F26522]/5 rounded-lg transition-colors flex items-center gap-3"
+                              >
+                                <BookOpen className="w-4 h-4 text-[#F26522] shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-[#111] truncate">{c.title}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Modules */}
+                      {searchResults?.modules?.length > 0 && (
+                        <div className="p-2">
+                          <p className="px-3 py-1.5 text-[10px] font-bold text-[#6A6F73] uppercase tracking-wider">Modules</p>
+                          <div className="space-y-0.5">
+                            {searchResults.modules.map((m: any) => (
+                              <button 
+                                key={`module-${m.id}`} 
+                                onClick={() => { router.push(`/courses/${m.course_id}/modules/${m.id}`); setSearchOpen(false); setSearchQuery(''); }}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-[#F26522]/5 rounded-lg transition-colors flex items-center gap-3"
+                              >
+                                <FileText className="w-4 h-4 text-orange-500 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-[#111] truncate">{m.title}</p>
+                                  <p className="text-[10px] text-[#6A6F73] truncate">Module ID: {m.id}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Users */}
+                      {searchResults?.users?.length > 0 && (
+                        <div className="p-2">
+                          <p className="px-3 py-1.5 text-[10px] font-bold text-[#6A6F73] uppercase tracking-wider">Users & HR</p>
+                          <div className="space-y-0.5">
+                            {searchResults.users.map((u: any) => (
+                              <button 
+                                key={`user-${u.id}`} 
+                                onClick={() => { router.push(`/users/${u.id}`); setSearchOpen(false); setSearchQuery(''); }}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-[#F26522]/5 rounded-lg transition-colors flex items-start gap-3"
+                              >
+                                <div className="w-7 h-7 rounded-full bg-[#F26522]/10 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                                  {u.name?.[0]?.toUpperCase() || '?'}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-semibold text-[#111] truncate">{u.name}</p>
+                                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 text-[#6A6F73] border border-gray-200 shrink-0 capitalize">{u.role}</span>
+                                  </div>
+                                  <p className="text-[10px] text-[#6A6F73] truncate">{u.email} • ID: {u.employee_id || 'N/A'}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : (
-                    <div className="p-4 text-center text-sm text-[#6A6F73]">No results found</div>
+                    <div className="p-6 text-center text-sm text-[#6A6F73]">
+                      No resources, courses, modules or users found
+                    </div>
                   )}
                 </div>
               )}

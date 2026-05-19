@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
 from auth import get_current_user
-from models import UserProgress, UserVideoProgress, Video, Module, Notes, Assignment, Quiz, QuizAttempt, Enrollment
+from models import UserProgress, UserVideoProgress, Video, Module, Notes, Assignment, Quiz, QuizAttempt, Enrollment, ActivityLog
 from schemas import VideoProgressUpdate, NotesProgressUpdate, ModuleProgressDetail, UserVideoProgressOut, CourseProgress
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone

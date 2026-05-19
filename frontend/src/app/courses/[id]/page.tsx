@@ -34,17 +34,31 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [moduleToDelete, setModuleToDelete] = useState<any>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [progressData, setProgressData] = useState<Record<number, any>>({});
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isEmployee = currentUser?.role === 'employee';
 
-  useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { fetchData(); }, [id, currentUser]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       const data = await api.common.getCourse(parseInt(id));
       setCourse(data);
+
+      if (currentUser?.role === 'employee' && data.modules?.length > 0) {
+        const progressPromises = data.modules.map((m: any) =>
+          api.employee.getModuleProgressDetail(parseInt(id), m.id)
+            .catch(() => ({ module_id: m.id }))
+        );
+        const progressResults = await Promise.all(progressPromises);
+        const progressMap: Record<number, any> = {};
+        progressResults.forEach(p => {
+          if (p?.module_id) progressMap[p.module_id] = p;
+        });
+        setProgressData(progressMap);
+      }
     } catch (error) {
       toast.error('Failed to load course details');
     } finally {
@@ -61,17 +75,57 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
   if (!course) return null;
 
   const totalDuration = course.modules?.reduce((acc: number, m: any) => acc + (m.duration_seconds || 0), 0) || 0;
-  const completedCount = course.modules?.filter((m: any) => m.is_completed).length || 0;
   const totalCount = course.modules?.length || 0;
-  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+  // Dynamic Progress calculations
+  let courseTotalItems = 0;
+  let courseCompletedItems = 0;
+
+  const modulesProgress = course.modules?.map((m: any) => {
+    const currProg = progressData[m.id] || {};
+    const totalVideos = m.video_count || 0;
+    const completedVideos = currProg?.videos?.filter((v: any) => v?.is_completed)?.length || 0;
+
+    const hasNotes = m.note_count > 0;
+    const notesDone = !hasNotes || currProg?.notes_completed === true;
+
+    const hasAssignment = m.assignment_count > 0;
+    const assignmentDone = !hasAssignment || currProg?.assignment_completed === true;
+
+    const hasQuiz = m.quiz_count > 0;
+    const quizDone = !hasQuiz || currProg?.quiz_completed === true;
+
+    // Items for this module
+    const totalItems = totalVideos + (hasNotes ? 1 : 0) + (hasAssignment ? 1 : 0) + (hasQuiz ? 1 : 0);
+    const completedItems = completedVideos + (hasNotes && notesDone ? 1 : 0) + (hasAssignment && assignmentDone ? 1 : 0) + (hasQuiz && quizDone ? 1 : 0);
+
+    courseTotalItems += totalItems;
+    courseCompletedItems += completedItems;
+
+    const pct = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+    const isCompleted = m.is_completed || (totalItems > 0 && completedItems === totalItems);
+
+    return {
+      id: m.id,
+      pct,
+      isCompleted
+    };
+  }) || [];
+
+  const progressPct = courseTotalItems > 0 ? Math.round((courseCompletedItems / courseTotalItems) * 100) : 0;
+  const completedCount = modulesProgress.filter((mp: any) => mp.isCompleted).length || 0;
 
   // Determine which module to resume (first non-completed)
-  const resumeModule = course.modules?.find((m: any) => !m.is_completed) || course.modules?.[0];
+  const resumeModule = course.modules?.find((m: any, idx: number) => {
+    const mp = modulesProgress[idx];
+    return mp ? !mp.isCompleted : !m.is_completed;
+  }) || course.modules?.[0];
 
   // Module lock logic: module[i] is locked if module[i-1] is not completed
   const isModuleLocked = (index: number) => {
     if (index === 0) return false;
-    return !course.modules[index - 1]?.is_completed;
+    const prevModProgress = modulesProgress[index - 1];
+    return prevModProgress ? !prevModProgress.isCompleted : !course.modules[index - 1]?.is_completed;
   };
 
   const handleModuleClick = (module: any, index: number) => {
@@ -218,7 +272,8 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
           <div className="space-y-2">
             {course.modules.map((module: any, index: number) => {
               const locked = isEmployee && isModuleLocked(index);
-              const completed = module.is_completed;
+              const moduleProg = modulesProgress[index];
+              const completed = moduleProg ? moduleProg.isCompleted : module.is_completed;
               const isCurrent = isEmployee && !completed && !locked;
 
               return (
@@ -299,7 +354,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                         ) : completed ? (
                           <Badge className="text-[10px] bg-green-50 text-green-700 border-green-200 border">Completed</Badge>
                         ) : isCurrent ? (
-                          <Badge className="text-[10px] bg-orange-50 text-[#F26522] border-orange-200 border">Current</Badge>
+                          <Badge className="text-[10px] bg-orange-50 text-[#F26522] border-orange-200 border">Current ({moduleProg?.pct}%)</Badge>
                         ) : (
                           <ChevronRight className="w-4 h-4 text-gray-300" />
                         )}
@@ -416,10 +471,6 @@ function CreateModuleDialog({ courseId, onCreated }: { courseId: string, onCreat
             <Label>Module Title</Label>
             <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" placeholder="e.g. Getting Started" required />
           </div>
-          <div className="space-y-2">
-            <Label>Description</Label>
-            <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="border-[#eee] min-h-[80px]" placeholder="Module description..." />
-          </div>
           <DialogFooter>
             <Button type="submit" disabled={loading} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white">
               {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -459,10 +510,6 @@ function EditModuleDialog({ module, courseId, onUpdated, onCancel, isOpen }: { m
           <div className="space-y-2">
             <Label>Module Title</Label>
             <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" required />
-          </div>
-          <div className="space-y-2">
-            <Label>Description</Label>
-            <Textarea value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="border-[#eee] min-h-[80px]" />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>Cancel</Button>

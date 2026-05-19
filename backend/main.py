@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -6,6 +6,17 @@ from database import create_tables
 from routers import courses, progress, assignments, super_admin, dashboard, user, registration, payment, upload, notifications
 import routes
 import ai_routes
+
+class CustomStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        if "assignments" in path:
+            query_string = scope.get("query_string", b"")
+            if b"download" in query_string:
+                filename = os.path.basename(path)
+                response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+                response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
 
 app = FastAPI(
     title="Lumina LMS API",
@@ -29,7 +40,7 @@ app.add_middleware(
 # ── STATIC FILES ───────────────────────────────────────────────────────────
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", CustomStaticFiles(directory="uploads"), name="uploads")
 
 # ── ROUTES ─────────────────────────────────────────────────────────────────
 app.include_router(registration.router, prefix="/api")
@@ -48,7 +59,7 @@ app.include_router(notifications.router, prefix="/api")
 # Serve uploaded files locally
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", CustomStaticFiles(directory="uploads"), name="uploads")
 
 # ── STARTUP ────────────────────────────────────────────────────────────────
 @app.on_event("startup")

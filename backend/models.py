@@ -37,6 +37,7 @@ class User(Base):
     avatar_initials = Column(String(5), nullable=True)
     avatar_url = Column(String(500), nullable=True)
     department = Column(String(100), nullable=True)
+    designation = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
     country_code = Column(String(10), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)

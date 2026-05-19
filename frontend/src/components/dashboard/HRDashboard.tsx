@@ -47,7 +47,7 @@ export default function HRDashboard() {
   const [hrMembers, setHrMembers] = useState<any[]>([]);
   const [formData, setFormData] = useState({ user_id: '', course_id: '', requested_due_date: '', note: '' });
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
-  const [addUserData, setAddUserData] = useState({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
+  const [addUserData, setAddUserData] = useState({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
   const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -118,7 +118,7 @@ export default function HRDashboard() {
       await api.admin.createUser(addUserData);
       toast.success("User successfully added to platform");
       setIsAddUserOpen(false);
-      setAddUserData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
+      setAddUserData({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
       fetchData();
     } catch (error: any) {
       toast.error(error.message || "Failed to create user");

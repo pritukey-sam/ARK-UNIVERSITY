@@ -106,6 +106,12 @@ def create_tables():
                 conn.commit()
             print("Added department column to users table")
 
+        if 'designation' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN designation VARCHAR(100)"))
+                conn.commit()
+            print("Added designation column to users table")
+
         if 'phone' not in user_columns:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(20)"))

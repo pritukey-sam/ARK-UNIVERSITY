@@ -51,7 +51,7 @@ export default function UsersPage() {
   const [hrUsers, setHrUsers] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
-    name: '', email: '', role: 'employee', department: 'Engineering', employee_id: ''
+    name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: ''
   });
   
   const [assignData, setAssignData] = useState({
@@ -67,6 +67,21 @@ export default function UsersPage() {
     setMounted(true);
     fetchData();
   }, []);
+
+  const fetchNextId = async (role: string) => {
+    try {
+      const res = await api.admin.getNextUserId(role);
+      setFormData(prev => ({ ...prev, employee_id: res.employee_id }));
+    } catch (err) {
+      console.error("Failed to load next employee ID:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isAddModalOpen) {
+      fetchNextId(formData.role);
+    }
+  }, [isAddModalOpen, formData.role]);
 
   const fetchData = async () => {
     try {
@@ -95,7 +110,7 @@ export default function UsersPage() {
       await api.admin.createUser(formData);
       toast.success("User successfully added to platform");
       setIsAddModalOpen(false);
-      setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
+      setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
       fetchData();
     } catch (error: any) {
       toast.error(error.message || "Failed to create user");
@@ -141,6 +156,7 @@ export default function UsersPage() {
       email: user.email,
       role: user.role,
       department: user.department || 'Engineering',
+      designation: user.designation || '',
       employee_id: user.employee_id || ''
     });
     setIsEditModalOpen(true);
@@ -174,6 +190,9 @@ export default function UsersPage() {
 
   const filtered = useMemo(() => {
     let result = users.filter(u => {
+      // Hide/remove Admin and Super Admin accounts from this users listing
+      if (u.role === 'admin' || u.role === 'super_admin') return false;
+
       // Base visibility logic
       if (currentUser?.role === 'hr') {
         // HR can see employees and themselves? Or all employees? 
@@ -258,7 +277,7 @@ export default function UsersPage() {
         <div className="flex gap-4 items-center w-full md:w-auto">
           {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') && (
             <Button onClick={() => {
-              setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', employee_id: '' });
+              setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
               setIsAddModalOpen(true);
             }} className="bg-[#F26522] hover:bg-[#D54D10] text-white font-bold h-11 px-6 rounded-xl shadow-lg shadow-orange-200 transition-all active:scale-95">
               <UserPlus className="w-4 h-4 mr-2" /> Add User
@@ -293,9 +312,6 @@ export default function UsersPage() {
                   <SelectItem value="All">All Users</SelectItem>
                   <SelectItem value="Employee">Employees</SelectItem>
                   <SelectItem value="HR">HR Managers</SelectItem>
-                  {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') && (
-                    <SelectItem value="Admin">Platform Admins</SelectItem>
-                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -506,6 +522,16 @@ export default function UsersPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Designation <span className="text-red-500">*</span></Label>
+                <Input value={formData.designation} onChange={e => setFormData({...formData, designation: e.target.value})} placeholder="e.g. AI Engineer" className="border-gray-200 h-11 rounded-xl" required />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Employee ID (Auto-Generated)</Label>
+                <Input value={formData.employee_id} disabled className="border-gray-200 h-11 rounded-xl bg-gray-50 text-gray-400 cursor-not-allowed font-mono" />
+              </div>
+
               <Button type="submit" disabled={submitting} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white font-black h-12 mt-4 rounded-xl shadow-lg shadow-orange-100">
                 {submitting ? 'Creating Account...' : 'Provision Account'}
               </Button>
@@ -532,10 +558,15 @@ export default function UsersPage() {
                 <Input type="email" value={formData.email} disabled className="border-gray-200 h-11 rounded-xl bg-gray-50 text-gray-400" />
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Designation <span className="text-red-500">*</span></Label>
+              <Input value={formData.designation} onChange={e => setFormData({...formData, designation: e.target.value})} placeholder="e.g. AI Engineer" className="border-gray-200 h-11 rounded-xl" required />
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Department</Label>
-                <Select value={formData.department} onValueChange={v => setFormData({...formData, department: v})}>
+                <Select value={formData.department} onValueChange={v => setFormData({...formData, department: v as string})}>
                   <SelectTrigger className="border-gray-200 h-11 rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-white rounded-xl border-gray-100">
                     <SelectItem value="Engineering">Engineering</SelectItem>
@@ -547,7 +578,7 @@ export default function UsersPage() {
               </div>
               <div className="space-y-2">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Role</Label>
-                <Select value={formData.role} onValueChange={v => setFormData({...formData, role: v})}>
+                <Select value={formData.role} onValueChange={v => setFormData({...formData, role: v as string})}>
                   <SelectTrigger className="border-gray-200 h-11 rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-white rounded-xl border-gray-100">
                     <SelectItem value="employee">Employee</SelectItem>
@@ -578,7 +609,7 @@ export default function UsersPage() {
           <form onSubmit={handleAssignCourse} className="space-y-4 pt-4">
             <div className="space-y-2">
               <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Select Curriculum Track</Label>
-              <Select value={assignData.course_id} onValueChange={v => setAssignData({...assignData, course_id: v})}>
+              <Select value={assignData.course_id} onValueChange={v => setAssignData({...assignData, course_id: v as string})}>
                 <SelectTrigger className="border-gray-200 h-12 rounded-xl">
                   <SelectValue placeholder="Choose a course...">
                     {assignData.course_id ? courses?.find(c => c.id.toString() === assignData.course_id)?.title : undefined}
@@ -591,7 +622,7 @@ export default function UsersPage() {
             </div>
             <div className="space-y-2">
               <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Approving Authority</Label>
-              <Select value={assignData.hr_id} onValueChange={v => setAssignData({...assignData, hr_id: v})}>
+              <Select value={assignData.hr_id} onValueChange={v => setAssignData({...assignData, hr_id: v as string})}>
                 <SelectTrigger className="border-gray-200 h-12 rounded-xl">
                   <SelectValue placeholder="Select admin...">
                     {assignData.hr_id ? (() => {

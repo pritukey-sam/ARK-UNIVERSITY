@@ -66,6 +66,29 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
 
   const { user, stats, course_analytics, recent_activity } = data;
 
+  // Custom Display Sorting:
+  // 1. Ongoing first: progress > 0% and < 100%
+  // 2. Completed second: progress === 100%
+  // 3. Not Started last: progress === 0%
+  const sortedCourses = [...(course_analytics || [])].sort((a: any, b: any) => {
+    const getCategoryScore = (course: any) => {
+      const pct = course.progress_percent || 0;
+      if (pct > 0 && pct < 100) return 1; // Ongoing (First)
+      if (pct === 100) return 2;          // Completed (Second)
+      return 3;                           // Not Started (Third)
+    };
+    
+    const scoreA = getCategoryScore(a);
+    const scoreB = getCategoryScore(b);
+    
+    if (scoreA !== scoreB) {
+      return scoreA - scoreB;
+    }
+    
+    // Stable alphabetical sort as secondary criteria
+    return (a.course_name || "").localeCompare(b.course_name || "");
+  });
+
   return (
     <div className="min-h-screen bg-[#FAFBFC] p-6 md:p-8 lg:p-12 font-sans text-gray-900">
       <div className="max-w-5xl mx-auto space-y-10">
@@ -116,7 +139,10 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
                     {user.role.replace('_', ' ')}
                   </Badge>
                 </div>
-                <div className="flex items-center justify-center md:justify-start gap-2 text-gray-500">
+                {user.designation && (
+                  <p className="text-sm font-extrabold text-[#F26522] tracking-wide mt-1">{user.designation}</p>
+                )}
+                <div className="flex items-center justify-center md:justify-start gap-2 text-gray-500 mt-1">
                   <Mail className="w-3.5 h-3.5 opacity-40" />
                   <span className="text-sm font-medium">{user.email}</span>
                 </div>
@@ -155,7 +181,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex items-center justify-between px-1">
             <div className="space-y-1">
               <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider flex items-center gap-2">
-                <Award className="w-4 h-4 text-[#F26522]" /> All Courses
+                <Award className="w-4 h-4 text-[#F26522]" /> Assign Courses
               </h3>
               <p className="text-xs font-medium text-gray-400">Track and view student course progress.</p>
             </div>
@@ -165,7 +191,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           
           <div className="grid grid-cols-1 gap-4">
-            {course_analytics.length > 0 ? course_analytics.map((course: any, idx: number) => {
+            {sortedCourses.length > 0 ? sortedCourses.map((course: any, idx: number) => {
               const isCompleted = course.progress_percent === 100;
               const isStarted = course.progress_percent > 0;
               

@@ -41,12 +41,13 @@ def create_assignment_request(
             raise HTTPException(status_code=404, detail="Authorized requester (HR/Admin) not found")
         
         # 4. Check Duplicate Requests
+        is_admin_direct = current_user["role"] in ["admin", "super_admin"]
         existing = db.query(AssignmentRequest).filter(
             AssignmentRequest.user_id == body.user_id,
             AssignmentRequest.course_id == body.course_id,
             AssignmentRequest.status == "pending"
         ).first()
-        if existing:
+        if existing and not is_admin_direct:
             raise HTTPException(status_code=400, detail="An assignment request for this course is already pending review")
         
         # 5. Check Existing Enrollment
@@ -54,7 +55,7 @@ def create_assignment_request(
             Enrollment.user_id == body.user_id,
             Enrollment.course_id == body.course_id
         ).first()
-        if enrolled:
+        if enrolled and not is_admin_direct:
             raise HTTPException(status_code=400, detail="User is already enrolled in this curriculum")
 
         # 6. Safety: Default Due Date Logic
@@ -69,39 +70,65 @@ def create_assignment_request(
             hr_id=hr.id,
             user_id=user.id,
             course_id=course.id,
-            status="pending",
+            status="approved" if is_admin_direct else "pending",
             requested_due_date=body.requested_due_date,
             due_date=final_due_date,
-            note=body.note
+            note=body.note,
+            admin_id=current_user["id"] if is_admin_direct else None,
+            approved_at=datetime.now(timezone.utc) if is_admin_direct else None
         )
         
         db.add(new_request)
         db.commit()
         db.refresh(new_request)
 
-        # 8. Create Notifications for Admins
-        try:
-            from models import Notification
-            # Find all admins/superadmins in this company
-            admins = db.query(User).filter(
-                User.company_id == company_id,
-                User.role.in_(['admin', 'super_admin']),
-                User.is_active == True
-            ).all()
-
-            for admin in admins:
-                notif = Notification(
-                    user_id=admin.id,
-                    title="New Assignment Request",
-                    message=f"HR ({hr.name}) requested '{course.title}' for {user.name}",
-                    type="assignment_request",
-                    route="/assignments",
-                    is_read=False
+        # If admin direct, also create/update enrollment immediately
+        if is_admin_direct:
+            if enrolled:
+                enrolled.is_active = True
+                enrolled.due_date = final_due_date
+            else:
+                enrollment = Enrollment(
+                    user_id=user.id,
+                    course_id=course.id,
+                    due_date=final_due_date
                 )
-                db.add(notif)
+                db.add(enrollment)
+            
+            # Log Activity
+            from models import ActivityLog
+            activity = ActivityLog(
+                company_id=company_id,
+                user_id=current_user["id"],
+                action=f"Approved course assignment for {user.name}: {course.title}"
+            )
+            db.add(activity)
             db.commit()
-        except Exception as notif_err:
-            print(f"Notification Error (non-fatal): {notif_err}")
+
+        # 8. Create Notifications for Admins
+        if not is_admin_direct:
+            try:
+                from models import Notification
+                # Find all admins/superadmins in this company
+                admins = db.query(User).filter(
+                    User.company_id == company_id,
+                    User.role.in_(['admin', 'super_admin']),
+                    User.is_active == True
+                ).all()
+
+                for admin in admins:
+                    notif = Notification(
+                        user_id=admin.id,
+                        title="New Assignment Request",
+                        message=f"HR ({hr.name}) requested '{course.title}' for {user.name}",
+                        type="assignment_request",
+                        route="/assignments",
+                        is_read=False
+                    )
+                    db.add(notif)
+                db.commit()
+            except Exception as notif_err:
+                print(f"Notification Error (non-fatal): {notif_err}")
         
         # 9. Return safely with a plain dictionary to ensure serialization safety
         return {
