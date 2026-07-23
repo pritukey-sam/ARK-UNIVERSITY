@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Company, User
-from auth import hash_password
+from auth import hash_password, validate_email_format
 from schemas import CompanyWithAdminCreate
 import random
 import string
@@ -23,6 +23,10 @@ def generate_company_code(name: str, db: Session):
 
 @router.post("/register-company")
 def register_company(body: CompanyWithAdminCreate, db: Session = Depends(get_db)):
+    # Check if email format is valid
+    if not validate_email_format(body.admin_email):
+        raise HTTPException(status_code=400, detail="Invalid email address format")
+        
     # Check if email exists
     existing_user = db.query(User).filter(User.email == body.admin_email).first()
     if existing_user:

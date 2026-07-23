@@ -8,6 +8,9 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Label } from '@/components/ui/label';
 import { Building2, User, Mail, Lock, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { validateEmailField, validateName, validateCourseName } from '@/lib/validation';
 
 export default function RegisterCompanyPage() {
  const router = useRouter();
@@ -21,9 +24,67 @@ export default function RegisterCompanyPage() {
  adminEmail: '',
  password: '',
  });
+ 
+ const [companyNameError, setCompanyNameError] = useState<string | null>(null);
+ const [adminNameError, setAdminNameError] = useState<string | null>(null);
+ const [emailError, setEmailError] = useState<string | null>(null);
+ const [passwordError, setPasswordError] = useState<string | null>(null);
+
+ const handleCompanyNameChange = (val: string) => {
+   setFormData(prev => ({ ...prev, companyName: val }));
+   const check = validateCourseName(val);
+   setCompanyNameError(check.isValid ? null : (check.error || "Invalid company name"));
+ };
+
+ const handleAdminNameChange = (val: string) => {
+   setFormData(prev => ({ ...prev, adminName: val }));
+   const check = validateName(val);
+   setAdminNameError(check.isValid ? null : (check.error || "Invalid admin name"));
+ };
+
+ const handleAdminEmailChange = (val: string) => {
+   setFormData(prev => ({ ...prev, adminEmail: val }));
+   const check = validateEmailField(val);
+   setEmailError(check.isValid ? null : (check.error || "Invalid email address"));
+ };
+
+ const handlePasswordChange = (val: string) => {
+   setFormData(prev => ({ ...prev, password: val }));
+   if (!val) {
+     setPasswordError("Password is required");
+   } else if (val.length < 8) {
+     setPasswordError("Password must be at least 8 characters long");
+   } else {
+     setPasswordError(null);
+   }
+ };
 
  const handleSubmit = async (e: React.FormEvent) => {
  e.preventDefault();
+
+ const companyCheck = validateCourseName(formData.companyName);
+ if (!companyCheck.isValid) {
+   setCompanyNameError(companyCheck.error || "Invalid company name");
+   return toast.error(companyCheck.error || "Invalid company name");
+ }
+
+ const adminCheck = validateName(formData.adminName);
+ if (!adminCheck.isValid) {
+   setAdminNameError(adminCheck.error || "Invalid admin name");
+   return toast.error(adminCheck.error || "Invalid admin name");
+ }
+
+ const emailCheck = validateEmailField(formData.adminEmail);
+ if (!emailCheck.isValid) {
+   setEmailError(emailCheck.error || "Invalid email address");
+   return toast.error(emailCheck.error || "Invalid email address");
+ }
+
+ if (formData.password.length < 8) {
+   setPasswordError("Password must be at least 8 characters long");
+   return toast.error("Password must be at least 8 characters long");
+ }
+
  setLoading(true);
 
  try {
@@ -89,7 +150,7 @@ export default function RegisterCompanyPage() {
  <div className="max-w-4xl w-full grid md:grid-cols-2 gap-8 items-center">
  <div className="space-y-6">
  <h1 className="text-5xl font-bold text-[#111] leading-tight">
- Empower your team with <span className="text-[#F26522]">Lumina LMS</span>
+ Empower your team with <span className="text-[#F26522]">ARK University LMS</span>
  </h1>
  <p className="text-[#6A6F73] text-lg">
  Create a dedicated learning space for your company. Assign courses, track progress, and foster growth.
@@ -134,69 +195,85 @@ export default function RegisterCompanyPage() {
  <div className="space-y-2">
  <Label htmlFor="companyName">Company Name</Label>
  <div className="relative">
- <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]" />
+ <Building2 className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]", companyNameError && "text-red-500")} />
  <Input 
  id="companyName"
- placeholder="Lumina Corp" 
+ placeholder="ARK University Corp" 
  value={formData.companyName}
- onChange={e => setFormData({...formData, companyName: e.target.value})}
+ onChange={e => handleCompanyNameChange(e.target.value)}
+ onBlur={e => handleCompanyNameChange(e.target.value)}
  required
- className="pl-10 border-[#eee]"
+ className={cn("pl-10 border-[#eee]", companyNameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
  />
  </div>
+ {companyNameError && (
+   <p className="text-red-500 text-xs mt-1 font-bold">{companyNameError}</p>
+ )}
  </div>
 
  <div className="space-y-2">
  <Label htmlFor="adminName">Admin Name</Label>
  <div className="relative">
- <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]" />
+ <User className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]", adminNameError && "text-red-500")} />
  <Input 
  id="adminName"
  placeholder="John Doe" 
  value={formData.adminName}
- onChange={e => setFormData({...formData, adminName: e.target.value})}
+ onChange={e => handleAdminNameChange(e.target.value)}
+ onBlur={e => handleAdminNameChange(e.target.value)}
  required
- className="pl-10 border-[#eee]"
+ className={cn("pl-10 border-[#eee]", adminNameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
  />
  </div>
+ {adminNameError && (
+   <p className="text-red-500 text-xs mt-1 font-bold">{adminNameError}</p>
+ )}
  </div>
 
  <div className="space-y-2">
  <Label htmlFor="adminEmail">Admin Email</Label>
  <div className="relative">
- <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]" />
+ <Mail className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]", emailError && "text-red-500")} />
  <Input 
  id="adminEmail"
  type="email"
  placeholder="admin@company.com" 
  value={formData.adminEmail}
- onChange={e => setFormData({...formData, adminEmail: e.target.value})}
+ onChange={e => handleAdminEmailChange(e.target.value)}
+ onBlur={e => handleAdminEmailChange(e.target.value)}
  required
- className="pl-10 border-[#eee]"
+ className={cn("pl-10 border-[#eee]", emailError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
  />
  </div>
+ {emailError && (
+   <p className="text-red-500 text-xs mt-1 font-bold">{emailError}</p>
+ )}
  </div>
 
  <div className="space-y-2">
  <Label htmlFor="password">Password</Label>
  <div className="relative">
- <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]" />
+ <Lock className={cn("absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6A6F73]", passwordError && "text-red-500")} />
  <Input 
  id="password"
  type="password"
  placeholder="••••••••" 
  value={formData.password}
- onChange={e => setFormData({...formData, password: e.target.value})}
+ onChange={e => handlePasswordChange(e.target.value)}
+ onBlur={e => handlePasswordChange(e.target.value)}
  required
- className="pl-10 border-[#eee]"
+ className={cn("pl-10 border-[#eee]", passwordError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
  />
  </div>
+ {passwordError && (
+   <p className="text-red-500 text-xs mt-1 font-bold">{passwordError}</p>
+ )}
  </div>
 
  <Button 
  type="submit" 
- disabled={loading}
- className="w-full bg-[#111] hover:bg-[#333] text-white h-12 rounded-xl font-bold mt-4"
+ disabled={loading || !!companyNameError || !!adminNameError || !!emailError || !!passwordError}
+ className="w-full bg-[#111] hover:bg-[#333] text-white h-12 rounded-xl font-bold mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
  >
  {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Register Company"}
  </Button>

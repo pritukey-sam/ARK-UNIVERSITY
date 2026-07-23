@@ -10,7 +10,7 @@ export default function SuperAdminPage() {
  const router = useRouter();
 
  useEffect(() => {
- if (!loading && (!user || user.role !== 'super_admin')) router.push('/login');
+ if (!loading && (!user || user.role !== 'super_admin')) router.replace('/login');
  }, [user, loading, router]);
 
  if (loading || !user || user.role !== 'super_admin') {

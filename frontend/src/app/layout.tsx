@@ -16,7 +16,7 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
- title: "Lumina LMS | Premium Learning",
+ title: "ARK University LMS | Premium Learning",
  description: "Empower your workforce with smart learning.",
 };
 

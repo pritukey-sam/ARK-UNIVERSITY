@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from database import get_db
+from database import get_db, log_audit_event
 from auth import require_roles, get_current_user
 from models import AssignmentRequest, User, Course, Enrollment, Module
 from schemas import AssignmentRequestCreate, AssignmentRequestOut
@@ -18,17 +18,21 @@ def create_assignment_request(
     current_user=Depends(require_roles(["hr", "admin"]))
 ):
     try:
+        print("[ASSIGNMENT DEBUG] Step 1 - Request received")
         company_id = current_user.get("company_id")
+        print("[ASSIGNMENT DEBUG] Step 2 - Payload validated")
         
         # 1. Validate User
         user = db.query(User).filter(User.id == body.user_id, User.company_id == company_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="Employee not found in your company context")
+        print("[ASSIGNMENT DEBUG] Step 3 - User fetched")
             
         # 2. Validate Course
         course = db.query(Course).filter(Course.id == body.course_id, Course.company_id == company_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found or inactive for your company")
+        print("[ASSIGNMENT DEBUG] Step 4 - Course fetched")
             
         # 3. Validate HR/Requester
         # Allow any 'hr' or 'admin' from the same company to be the requester
@@ -48,7 +52,7 @@ def create_assignment_request(
             AssignmentRequest.status == "pending"
         ).first()
         if existing and not is_admin_direct:
-            raise HTTPException(status_code=400, detail="An assignment request for this course is already pending review")
+            raise HTTPException(status_code=400, detail="Course already assigned to this user")
         
         # 5. Check Existing Enrollment
         enrolled = db.query(Enrollment).filter(
@@ -56,7 +60,7 @@ def create_assignment_request(
             Enrollment.course_id == body.course_id
         ).first()
         if enrolled and not is_admin_direct:
-            raise HTTPException(status_code=400, detail="User is already enrolled in this curriculum")
+            raise HTTPException(status_code=400, detail="User is already enrolled in this course")
 
         # 6. Safety: Default Due Date Logic
         # This will be finalized on approval, but we can store a suggested one
@@ -95,6 +99,19 @@ def create_assignment_request(
                 )
                 db.add(enrollment)
             
+            # Mark related course access request as fulfilled
+            from models import CourseAccessRequest
+            access_req = db.query(CourseAccessRequest).filter(
+                CourseAccessRequest.user_id == user.id,
+                CourseAccessRequest.course_id == course.id,
+                CourseAccessRequest.status.in_(["pending", "approved"])
+            ).first()
+            if access_req:
+                access_req.status = "fulfilled"
+                access_req.reviewed_by = current_user["id"]
+                access_req.reviewed_at = datetime.now(timezone.utc)
+                access_req.updated_at = datetime.now(timezone.utc)
+
             # Log Activity
             from models import ActivityLog
             activity = ActivityLog(
@@ -104,6 +121,7 @@ def create_assignment_request(
             )
             db.add(activity)
             db.commit()
+        print("[ASSIGNMENT DEBUG] Step 5 - Assignment created")
 
         # 8. Create Notifications for Admins
         if not is_admin_direct:
@@ -129,8 +147,26 @@ def create_assignment_request(
                 db.commit()
             except Exception as notif_err:
                 print(f"Notification Error (non-fatal): {notif_err}")
+        print("[ASSIGNMENT DEBUG] Step 6 - Notification created")
+        
+        print("[ASSIGNMENT DEBUG] Step 7 - Response returning")
         
         # 9. Return safely with a plain dictionary to ensure serialization safety
+        # Determine request type and requested by
+        from models import CourseAccessRequest
+        access_req = db.query(CourseAccessRequest).filter(
+            CourseAccessRequest.user_id == new_request.user_id,
+            CourseAccessRequest.course_id == new_request.course_id
+        ).first()
+
+        if access_req:
+            r_type = "Employee Course Access Request"
+            r_by = "Employee Self Request"
+        else:
+            r_type = "HR Assignment"
+            role_label = "HR" if hr.role.lower() == "hr" else "Admin"
+            r_by = f"{hr.name} ({role_label})"
+
         return {
             "id": new_request.id,
             "admin_id": new_request.admin_id,
@@ -149,7 +185,9 @@ def create_assignment_request(
             "user_email": user.email,
             "course_title": course.title,
             "hr_name": hr.name,
-            "employee_id": user.employee_id
+            "employee_id": user.employee_id,
+            "request_type": r_type,
+            "requested_by": r_by
         }
 
     except HTTPException as he:
@@ -194,6 +232,24 @@ def get_pending_requests(
                 out.hr_name = r.hr.name if r.hr else "Unknown HR"
                 out.completion_duration_days = r.course.completion_duration_days if r.course else None
                 out.employee_id = r.user.employee_id if r.user else "N/A"
+
+                # Determine request type and requested by
+                from models import CourseAccessRequest
+                access_req = db.query(CourseAccessRequest).filter(
+                    CourseAccessRequest.user_id == r.user_id,
+                    CourseAccessRequest.course_id == r.course_id
+                ).first()
+
+                if access_req:
+                    out.request_type = "Employee Course Access Request"
+                    out.requested_by = "Employee Self Request"
+                else:
+                    out.request_type = "HR Assignment"
+                    if r.hr:
+                        role_label = "HR" if r.hr.role.lower() == "hr" else "Admin"
+                        out.requested_by = f"{r.hr.name} ({role_label})"
+                    else:
+                        out.requested_by = "Unknown"
 
                 if r.status == "approved":
                     out.approval_timestamp = r.approved_at or r.updated_at
@@ -247,6 +303,24 @@ def get_all_requests(
                 out.hr_name = r.hr.name if r.hr else "Unknown HR"
                 out.completion_duration_days = r.course.completion_duration_days if r.course else None
                 out.employee_id = r.user.employee_id if r.user else "N/A"
+
+                # Determine request type and requested by
+                from models import CourseAccessRequest
+                access_req = db.query(CourseAccessRequest).filter(
+                    CourseAccessRequest.user_id == r.user_id,
+                    CourseAccessRequest.course_id == r.course_id
+                ).first()
+
+                if access_req:
+                    out.request_type = "Employee Course Access Request"
+                    out.requested_by = "Employee Self Request"
+                else:
+                    out.request_type = "HR Assignment"
+                    if r.hr:
+                        role_label = "HR" if r.hr.role.lower() == "hr" else "Admin"
+                        out.requested_by = f"{r.hr.name} ({role_label})"
+                    else:
+                        out.requested_by = "Unknown"
 
                 if r.status == "approved":
                     out.approval_timestamp = r.approved_at or r.updated_at
@@ -302,6 +376,31 @@ def approve_assignment(
     request.updated_at = datetime.now(timezone.utc)
     request.due_date = due_date
     
+    # Mark related course access request as fulfilled
+    from models import CourseAccessRequest
+    access_req = db.query(CourseAccessRequest).filter(
+        CourseAccessRequest.user_id == request.user_id,
+        CourseAccessRequest.course_id == request.course_id,
+        CourseAccessRequest.status.in_(["pending", "approved"])
+    ).first()
+    if access_req:
+        access_req.status = "fulfilled"
+        access_req.reviewed_by = current_user["id"]
+        access_req.reviewed_at = datetime.now(timezone.utc)
+        access_req.updated_at = datetime.now(timezone.utc)
+
+    # Notify employee of course assignment
+    from models import Notification
+    notif = Notification(
+        user_id=request.user_id,
+        title="Course Assigned",
+        message=f"You have been assigned the course {request.course.title}.",
+        type="course_assigned",
+        route="/courses",
+        is_read=False
+    )
+    db.add(notif)
+
     # 3. Create Activity Log
     from models import ActivityLog
     activity = ActivityLog(
@@ -312,6 +411,7 @@ def approve_assignment(
     db.add(activity)
     
     db.commit()
+    log_audit_event(db, "Course Assigned", current_user["id"], request.user.name, f"Approved course assignment for {request.user.name}: {request.course.title}", company_id)
     return {"message": "Assignment approved and user enrolled"}
 
 @router.post("/assignments/{request_id}/reject")

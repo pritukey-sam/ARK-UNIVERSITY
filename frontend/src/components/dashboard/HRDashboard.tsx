@@ -31,6 +31,7 @@ import {
   PieChart as RePieChart, Pie, Cell 
 } from 'recharts';
 import { useAuth } from '@/context/AuthContext';
+import { validateEmail } from '@/lib/validation';
 
 export default function HRDashboard() {
   const router = useRouter();
@@ -51,6 +52,8 @@ export default function HRDashboard() {
   const [submitting, setSubmitting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const [visibleAssignments, setVisibleAssignments] = useState(10);
 
   useEffect(() => { 
     setMounted(true);
@@ -74,8 +77,11 @@ export default function HRDashboard() {
       setAnalytics(aData);
       setPending(pData);
       setAssigned(progData);
-      setUsers(uData.filter((u: any) => u.role === 'employee'));
-      setHrMembers(uData.filter((u: any) => u.role === 'hr'));
+      setUsers(uData.filter((u: any) => (u.role || '').toLowerCase() === 'employee'));
+      setHrMembers(uData.filter((u: any) => {
+        const r = (u.role || '').toLowerCase();
+        return r === 'hr' || r === 'hr_manager' || r === 'hr manager';
+      }));
       setCourses(cData);
       setActivity(actData);
     } catch (e) { console.error(e); }
@@ -91,12 +97,30 @@ export default function HRDashboard() {
   const handleNewAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.user_id || !formData.course_id) return toast.error("Please select an employee and course");
+
+    const targetUser = users.find(u => u.id.toString() === formData.user_id);
+    const targetCourse = courses.find(c => c.id.toString() === formData.course_id);
+    if (targetUser && targetCourse) {
+      const isAlreadyEnrolled = targetUser.assigned_courses?.some((title: string) => title.toLowerCase() === targetCourse.title.toLowerCase());
+      if (isAlreadyEnrolled) {
+        return toast.error("User is already enrolled in this course");
+      }
+      
+      const isPending = pending.some(p => 
+        p.user_id.toString() === formData.user_id && 
+        p.course_id.toString() === formData.course_id
+      );
+      if (isPending) {
+        return toast.error("Course already assigned to this user");
+      }
+    }
+
     setSubmitting(true);
     try {
       await api.assignments.request({
         user_id: parseInt(formData.user_id),
         course_id: parseInt(formData.course_id),
-        hr_id: user?.id,
+        hr_id: user?.id as number,
         requested_due_date: formData.requested_due_date ? new Date(formData.requested_due_date).toISOString() : undefined,
         note: formData.note || undefined
       });
@@ -113,6 +137,11 @@ export default function HRDashboard() {
     if (!addUserData.name || !addUserData.email) {
       return toast.error("Please fill in all required fields");
     }
+
+    if (!validateEmail(addUserData.email.trim())) {
+      return toast.error("Please enter a valid email address (e.g. name@example.com)");
+    }
+
     try {
       setSubmitting(true);
       await api.admin.createUser(addUserData);
@@ -129,10 +158,16 @@ export default function HRDashboard() {
 
   const safeSearch = (search || '').toLowerCase();
 
-  const filteredAssigned = assigned.filter(a =>
-    (a?.employee_name || '').toLowerCase().includes(safeSearch) ||
-    (a?.course_title || '').toLowerCase().includes(safeSearch)
-  );
+  const filteredAssigned = assigned
+    .filter(a =>
+      (a?.employee_name || '').toLowerCase().includes(safeSearch) ||
+      (a?.course_title || '').toLowerCase().includes(safeSearch)
+    )
+    .sort((a, b) => {
+      const timeA = a.assigned_at ? new Date(a.assigned_at).getTime() : 0;
+      const timeB = b.assigned_at ? new Date(b.assigned_at).getTime() : 0;
+      return timeB - timeA;
+    });
   
   const overdueTrainings = assigned.filter(a => a.is_overdue);
 
@@ -195,7 +230,7 @@ export default function HRDashboard() {
               <form onSubmit={handleNewAssignment} className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label>Select User</Label>
-                  <Select value={formData.user_id} onValueChange={v => setFormData({...formData, user_id: v})}>
+                  <Select value={formData.user_id} onValueChange={v => setFormData({...formData, user_id: v as string})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Choose a learner...">
                         {formData.user_id ? (() => {
@@ -213,7 +248,7 @@ export default function HRDashboard() {
                 </div>
                 <div className="space-y-2">
                   <Label>Select Course</Label>
-                  <Select value={formData.course_id} onValueChange={v => setFormData({...formData, course_id: v})}>
+                  <Select value={formData.course_id} onValueChange={v => setFormData({...formData, course_id: v as string})}>
                     <SelectTrigger>
                       <SelectValue placeholder="Choose a course...">
                         {formData.course_id ? courses?.find(c => c.id.toString() === formData.course_id)?.title : undefined}
@@ -316,7 +351,7 @@ export default function HRDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#eee]">
-                  {filteredAssigned.length > 0 ? filteredAssigned.map((a, i) => (
+                  {filteredAssigned.length > 0 ? filteredAssigned.slice(0, visibleAssignments).map((a, i) => (
                     <tr key={`assignment-${i}`} className="hover:bg-gray-50/50 transition-colors group cursor-pointer" onClick={() => router.push(`/users`)}>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -364,6 +399,28 @@ export default function HRDashboard() {
                 </tbody>
               </table>
             </div>
+            {filteredAssigned.length > 10 && (
+              <div className="flex justify-center gap-4 py-4 border-t border-[#eee] bg-white">
+                {visibleAssignments < filteredAssigned.length && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setVisibleAssignments(prev => prev + 10)}
+                    className="border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 font-bold h-9 px-4 rounded-xl transition-all shadow-sm flex items-center gap-2 active:scale-95 text-xs"
+                  >
+                    Load More
+                  </Button>
+                )}
+                {visibleAssignments > 10 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setVisibleAssignments(10)}
+                    className="border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 font-bold h-9 px-4 rounded-xl transition-all shadow-sm flex items-center gap-2 active:scale-95 text-xs"
+                  >
+                    See Less
+                  </Button>
+                )}
+              </div>
+            )}
           </Card>
 
           {/* Upcoming Deadlines */}
@@ -465,12 +522,14 @@ export default function HRDashboard() {
                       <div className="mt-0.5">
                         <div className={cn(
                           "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                          item.type === 'submission' ? "bg-purple-100 text-purple-600" :
+                          (item.type === 'submission' || item.type === 'assignment_submitted') ? "bg-purple-100 text-purple-600" :
                           item.type === 'course_assigned' ? "bg-blue-100 text-blue-600" :
-                          "bg-green-100 text-green-600"
+                          (item.type === 'course_completed' || item.type === 'module_completed') ? "bg-green-100 text-green-700" :
+                          "bg-orange-100 text-orange-600"
                         )}>
-                          {item.type === 'submission' ? <CheckCircle2 className="w-4 h-4" /> :
+                          {(item.type === 'submission' || item.type === 'assignment_submitted') ? <CheckCircle2 className="w-4 h-4" /> :
                            item.type === 'course_assigned' ? <BookOpen className="w-4 h-4" /> :
+                           (item.type === 'course_completed' || item.type === 'module_completed') ? <Trophy className="w-4 h-4" /> :
                            <Activity className="w-4 h-4" />}
                         </div>
                       </div>

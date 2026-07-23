@@ -1,7 +1,7 @@
-# Lumina LMS - Project Summary
+# ARK University LMS - Project Summary
 
 ## 🚀 Overview
-Lumina LMS is a state-of-the-art, SaaS-ready Learning Management System designed for corporate training and educational institutions. It features a multi-tenant architecture, allowing multiple companies to manage their own employees and courses in complete isolation.
+ARK University LMS is a state-of-the-art, SaaS-ready Learning Management System designed for corporate training and educational institutions. It features a multi-tenant architecture, allowing multiple companies to manage their own employees and courses in complete isolation.
 
 ## 🛠️ Technology Stack
 ### Backend

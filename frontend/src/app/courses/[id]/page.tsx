@@ -23,6 +23,7 @@ import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Textarea } from '@/components/ui/textarea';
+import { validateCourseName, validateDescription, validateNumericRange, validateURL } from '@/lib/validation';
 
 export default function CourseDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -35,6 +36,8 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
   const [moduleToDelete, setModuleToDelete] = useState<any>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [progressData, setProgressData] = useState<Record<number, any>>({});
+  const [isCourseEditOpen, setIsCourseEditOpen] = useState(false);
+  const [isCourseDeleteOpen, setIsCourseDeleteOpen] = useState(false);
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isEmployee = currentUser?.role === 'employee';
@@ -103,7 +106,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
     courseCompletedItems += completedItems;
 
     const pct = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-    const isCompleted = m.is_completed || (totalItems > 0 && completedItems === totalItems);
+    const isCompleted = m.is_completed || currProg?.is_completed === true || (totalItems > 0 && completedItems === totalItems);
 
     return {
       id: m.id,
@@ -139,7 +142,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
   return (
     <div className="min-h-screen bg-[#fafafa]">
       {/* ── HERO BANNER ── */}
-      <div className="bg-white border-b border-[#eee]">
+      <div id="tour-course-details-hero" className="bg-white border-b border-[#eee]">
         <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
           {/* Back Navigation */}
           <BackNavigation />
@@ -217,32 +220,30 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
               )}
 
               {/* CTA Buttons */}
-              {!currentUser?.role?.includes('hr') && (
-                <div className="flex gap-3 pt-1">
-                  {isEmployee ? (
-                    <Button
-                      className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
-                      onClick={() => router.push(resumeModule ? `/courses/${id}/modules/${resumeModule.id}` : `#`)}
-                      disabled={!resumeModule}
-                    >
-                      {progressPct === 0 ? 'Start Learning' : progressPct === 100 ? 'Review Course' : 'Continue Learning'}
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Button>
-                  ) : (
-                    <Button
-                      className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
-                      onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}/preview` : `#`)}
-                      disabled={!course.modules || course.modules.length === 0}
-                    >
-                      Preview Course <ArrowRight className="w-4 h-4 ml-2" />
-                    </Button>
-                  )}
-                </div>
-              )}
+              <div className="flex gap-3 pt-1">
+                {currentUser?.role === 'employee' ? (
+                  <Button
+                    className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
+                    onClick={() => router.push(resumeModule ? `/courses/${id}/modules/${resumeModule.id}` : `#`)}
+                    disabled={!resumeModule}
+                  >
+                    {progressPct === 0 ? 'Start Learning' : progressPct === 100 ? 'Review Course' : 'Continue Learning'}
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                ) : currentUser?.role === 'super_admin' ? (
+                  <Button
+                    className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
+                    onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}/preview` : `#`)}
+                    disabled={!course.modules || course.modules.length === 0}
+                  >
+                    Preview Course <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                ) : null}
+              </div>
             </div>
 
             {/* Right: Thumbnail */}
-            <div className="lg:w-[340px] shrink-0">
+            <div className="lg:w-[340px] shrink-0 space-y-3">
               <div className="aspect-video rounded-xl overflow-hidden border border-[#eee] shadow-sm">
                 <img
                   src={course.thumbnail_url || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&auto=format&fit=crop&q=60'}
@@ -250,13 +251,34 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                   className="w-full h-full object-cover"
                 />
               </div>
+              {/* Edit and Delete Course Buttons — visible only to admin */}
+              {isAdmin && (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-3 text-xs font-semibold border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 rounded-lg active:scale-95 transition-all"
+                    onClick={() => setIsCourseEditOpen(true)}
+                  >
+                    <Edit2 className="w-3.5 h-3.5" /> Edit Course
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-8 px-3 text-xs font-semibold bg-red-500 hover:bg-red-600 text-white flex items-center gap-1.5 rounded-lg active:scale-95 transition-all"
+                    onClick={() => setIsCourseDeleteOpen(true)}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Course
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* ── MODULE LIST ── */}
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-4">
+      <div id="tour-course-curriculum" className="max-w-6xl mx-auto px-6 py-8 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-[#111]">Course Curriculum</h2>
           {isAdmin && <CreateModuleDialog courseId={id} onCreated={fetchData} />}
@@ -277,7 +299,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
               const isCurrent = isEmployee && !completed && !locked;
 
               return (
-                <div key={module.id}>
+                <div key={module.id} id={index === 0 ? "tour-course-first-module" : undefined}>
                   {/* ── EMPLOYEE MODULE CARD ── */}
                   {isEmployee ? (
                     <button
@@ -429,6 +451,26 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
           onCancel={() => { setIsDeleteOpen(false); setModuleToDelete(null); }}
         />
       )}
+      {/* Course Admin dialogs */}
+      {isAdmin && (
+        <>
+          <EditCourseDialog
+            course={course}
+            isOpen={isCourseEditOpen}
+            onUpdated={() => { fetchData(); setIsCourseEditOpen(false); }}
+            onCancel={() => setIsCourseEditOpen(false)}
+          />
+          <DeleteCourseDialog
+            course={course}
+            isOpen={isCourseDeleteOpen}
+            onDeleted={() => {
+              setIsCourseDeleteOpen(false);
+              router.push('/courses');
+            }}
+            onCancel={() => setIsCourseDeleteOpen(false)}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -441,9 +483,28 @@ function CreateModuleDialog({ courseId, onCreated }: { courseId: string, onCreat
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({ title: '', description: '', duration_seconds: 3600 });
+  const [titleError, setTitleError] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setTitleError('');
+    }
+  }, [open]);
+
+  const handleTitleChange = (val: string) => {
+    setFormData(prev => ({ ...prev, title: val }));
+    const check = validateCourseName(val);
+    setTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const tCheck = validateCourseName(formData.title);
+    if (!tCheck.isValid) {
+      setTitleError(tCheck.error || "Invalid title");
+      return toast.error(tCheck.error || "Invalid title");
+    }
+
     setLoading(true);
     try {
       await api.admin.createModule(parseInt(courseId), { ...formData, order: 0 });
@@ -469,10 +530,20 @@ function CreateModuleDialog({ courseId, onCreated }: { courseId: string, onCreat
         <form onSubmit={handleSubmit} className="space-y-4 pt-4">
           <div className="space-y-2">
             <Label>Module Title</Label>
-            <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" placeholder="e.g. Getting Started" required />
+            <Input 
+              value={formData.title} 
+              onChange={e => handleTitleChange(e.target.value)} 
+              onBlur={e => handleTitleChange(e.target.value)}
+              className={cn("border-[#eee]", titleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              placeholder="e.g. Getting Started" 
+              required 
+            />
+            {titleError && (
+              <p className="text-red-500 text-xs font-bold">{titleError}</p>
+            )}
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={loading} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white">
+            <Button type="submit" disabled={loading || !!titleError} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {loading ? 'Creating...' : 'Create Module'}
             </Button>
@@ -486,13 +557,27 @@ function CreateModuleDialog({ courseId, onCreated }: { courseId: string, onCreat
 function EditModuleDialog({ module, courseId, onUpdated, onCancel, isOpen }: { module: any, courseId: string, onUpdated: () => void, onCancel: () => void, isOpen: boolean }) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({ title: module?.title || '', description: module?.description || '' });
+  const [titleError, setTitleError] = useState('');
 
   useEffect(() => {
     if (module) setFormData({ title: module.title || '', description: module.description || '' });
-  }, [module]);
+    setTitleError('');
+  }, [module, isOpen]);
+
+  const handleTitleChange = (val: string) => {
+    setFormData(prev => ({ ...prev, title: val }));
+    const check = validateCourseName(val);
+    setTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const tCheck = validateCourseName(formData.title);
+    if (!tCheck.isValid) {
+      setTitleError(tCheck.error || "Invalid title");
+      return toast.error(tCheck.error || "Invalid title");
+    }
+
     setLoading(true);
     try {
       await api.admin.updateModule(module.id, { ...formData, course_id: parseInt(courseId), order: module.order || 0 });
@@ -509,11 +594,20 @@ function EditModuleDialog({ module, courseId, onUpdated, onCancel, isOpen }: { m
         <form onSubmit={handleSubmit} className="space-y-4 pt-4">
           <div className="space-y-2">
             <Label>Module Title</Label>
-            <Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="border-[#eee]" required />
+            <Input 
+              value={formData.title} 
+              onChange={e => handleTitleChange(e.target.value)} 
+              onBlur={e => handleTitleChange(e.target.value)}
+              className={cn("border-[#eee]", titleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              required 
+            />
+            {titleError && (
+              <p className="text-red-500 text-xs font-bold">{titleError}</p>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>Cancel</Button>
-            <Button type="submit" disabled={loading} className="bg-[#F26522] hover:bg-[#D54D10] text-white">
+            <Button type="submit" disabled={loading || !!titleError} className="bg-[#F26522] hover:bg-[#D54D10] text-white disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {loading ? 'Saving...' : 'Save Changes'}
             </Button>
@@ -554,6 +648,218 @@ function DeleteModuleDialog({ module, onDeleted, onCancel, isOpen }: { module: a
           <Button variant="outline" onClick={onCancel} disabled={deleting}>Cancel</Button>
           <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
             {deleting ? 'Deleting...' : 'Delete Module'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditCourseDialog({ course, onUpdated, onCancel, isOpen }: { course: any, onUpdated: () => void, onCancel: () => void, isOpen: boolean }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [courseForm, setCourseForm] = useState({
+    title: course.title || '',
+    description: course.description || '',
+    thumbnail_url: course.thumbnail_url || '',
+    completion_duration_days: course.completion_duration_days !== undefined && course.completion_duration_days !== null ? course.completion_duration_days : 30,
+    category: course.category || 'General'
+  });
+
+  const [titleError, setTitleError] = useState('');
+  const [descriptionError, setDescriptionError] = useState('');
+  const [durationError, setDurationError] = useState('');
+  const [urlError, setUrlError] = useState('');
+
+  useEffect(() => {
+    if (course) {
+      setCourseForm({
+        title: course.title || '',
+        description: course.description || '',
+        thumbnail_url: course.thumbnail_url || '',
+        completion_duration_days: course.completion_duration_days !== undefined && course.completion_duration_days !== null ? course.completion_duration_days : 30,
+        category: course.category || 'General'
+      });
+    }
+    setTitleError('');
+    setDescriptionError('');
+    setDurationError('');
+    setUrlError('');
+  }, [course, isOpen]);
+
+  const handleTitleChange = (val: string) => {
+    setCourseForm(prev => ({ ...prev, title: val }));
+    const check = validateCourseName(val);
+    setTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
+
+  const handleDescriptionChange = (val: string) => {
+    setCourseForm(prev => ({ ...prev, description: val }));
+    const check = validateDescription(val, true);
+    setDescriptionError(check.isValid ? '' : (check.error || 'Invalid description'));
+  };
+
+  const handleDurationChange = (val: string) => {
+    const parsed = parseInt(val) || 0;
+    setCourseForm(prev => ({ ...prev, completion_duration_days: parsed }));
+    const check = validateNumericRange(parsed, 1, 365, 'Duration');
+    setDurationError(check.isValid ? '' : (check.error || 'Invalid duration'));
+  };
+
+  const handleUrlChange = (val: string) => {
+    setCourseForm(prev => ({ ...prev, thumbnail_url: val }));
+    const check = validateURL(val, false);
+    setUrlError(check.isValid ? '' : (check.error || 'Invalid URL'));
+  };
+
+  const handleUpdateCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const tCheck = validateCourseName(courseForm.title);
+    if (!tCheck.isValid) {
+      setTitleError(tCheck.error || "Invalid title");
+      return toast.error(tCheck.error || "Invalid title");
+    }
+
+    const dCheck = validateDescription(courseForm.description, true);
+    if (!dCheck.isValid) {
+      setDescriptionError(dCheck.error || "Invalid description");
+      return toast.error(dCheck.error || "Invalid description");
+    }
+
+    const duCheck = validateNumericRange(courseForm.completion_duration_days, 1, 365, 'Duration');
+    if (!duCheck.isValid) {
+      setDurationError(duCheck.error || "Invalid duration");
+      return toast.error(duCheck.error || "Invalid duration");
+    }
+
+    const uCheck = validateURL(courseForm.thumbnail_url, false);
+    if (!uCheck.isValid) {
+      setUrlError(uCheck.error || "Invalid thumbnail URL");
+      return toast.error(uCheck.error || "Invalid thumbnail URL");
+    }
+    
+    setSubmitting(true);
+    try {
+      await api.admin.updateCourse(course.id, courseForm);
+      toast.success("Course updated successfully!");
+      onUpdated();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update course");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-[480px] bg-white rounded-2xl border border-gray-100 shadow-2xl p-6 md:p-8 [&>button]:rounded-full [&>button]:hover:bg-gray-100 [&>button]:transition-colors">
+        <DialogHeader className="space-y-1.5">
+          <DialogTitle className="text-xl font-bold text-gray-900 tracking-tight">Edit Course</DialogTitle>
+          <p className="text-sm text-gray-500 mt-1">Update the details of your course.</p>
+        </DialogHeader>
+        <form onSubmit={handleUpdateCourse} className="space-y-5 pt-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-title" className="text-xs font-bold text-gray-500 uppercase tracking-wider">Course Name <span className="text-red-500">*</span></Label>
+            <Input 
+              id="edit-title" 
+              value={courseForm.title} 
+              onChange={e => handleTitleChange(e.target.value)} 
+              onBlur={e => handleTitleChange(e.target.value)}
+              placeholder="e.g. Advanced React Patterns" 
+              className={cn("h-11 rounded-xl border-gray-200 px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200", titleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              required 
+            />
+            {titleError && (
+              <p className="text-red-500 text-xs font-bold">{titleError}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-desc" className="text-xs font-bold text-gray-500 uppercase tracking-wider">Course Description <span className="text-red-500">*</span></Label>
+            <Textarea 
+              id="edit-desc" 
+              value={courseForm.description} 
+              onChange={e => handleDescriptionChange(e.target.value)} 
+              onBlur={e => handleDescriptionChange(e.target.value)}
+              placeholder="Describe what learners will achieve..." 
+              className={cn("min-h-[100px] rounded-xl border-gray-200 p-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200 resize-none", descriptionError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              required 
+            />
+            {descriptionError && (
+              <p className="text-red-500 text-xs font-bold">{descriptionError}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-duration" className="text-xs font-bold text-gray-500 uppercase tracking-wider">Completion Duration (Days)</Label>
+            <Input 
+              id="edit-duration" 
+              type="number" 
+              value={courseForm.completion_duration_days} 
+              onChange={e => handleDurationChange(e.target.value)} 
+              onBlur={e => handleDurationChange(e.target.value)}
+              className={cn("h-11 rounded-xl border-gray-200 px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200", durationError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              min="1" 
+            />
+            {durationError && (
+              <p className="text-red-500 text-xs font-bold">{durationError}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-image" className="text-xs font-bold text-gray-500 uppercase tracking-wider">Thumbnail URL</Label>
+            <Input 
+              id="edit-image" 
+              value={courseForm.thumbnail_url} 
+              onChange={e => handleUrlChange(e.target.value)} 
+              onBlur={e => handleUrlChange(e.target.value)}
+              placeholder="https://example.com/image.jpg" 
+              className={cn("h-11 rounded-xl border-gray-200 px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200", urlError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+            />
+            {urlError && (
+              <p className="text-red-500 text-xs font-bold">{urlError}</p>
+            )}
+          </div>
+          <DialogFooter className="pt-4 flex flex-row gap-3 sm:justify-end">
+            <Button type="button" variant="outline" onClick={onCancel} className="h-11 rounded-xl px-6 font-semibold border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 active:scale-95 transition-all" disabled={submitting}>Cancel</Button>
+            <Button type="submit" className="h-11 rounded-xl px-6 font-bold bg-[#F26522] hover:bg-[#D54D10] text-white shadow-md shadow-orange-100 hover:shadow-lg hover:shadow-orange-200/50 active:scale-95 transition-all" disabled={submitting || !!titleError || !!descriptionError || !!durationError || !!urlError}>
+              {submitting ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteCourseDialog({ course, onDeleted, onCancel, isOpen }: { course: any, onDeleted: () => void, onCancel: () => void, isOpen: boolean }) {
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.admin.deleteCourse(course.id);
+      toast.success("Course deleted successfully");
+      onDeleted();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete course");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className="sm:max-w-[425px] bg-white rounded-2xl border border-gray-100 shadow-2xl p-6 md:p-8 [&>button]:rounded-full [&>button]:hover:bg-gray-100 [&>button]:transition-colors">
+        <DialogHeader>
+          <DialogTitle className="text-red-600 flex items-center gap-2 font-bold text-xl">
+            <Trash2 className="w-5 h-5" /> Delete Course
+          </DialogTitle>
+          <p className="text-sm text-gray-500 mt-2">
+            Are you sure you want to delete <strong>{course?.title}</strong>? This action cannot be undone and will remove all associated modules and progress.
+          </p>
+        </DialogHeader>
+        <DialogFooter className="pt-4 flex gap-3">
+          <Button variant="outline" className="rounded-xl" onClick={onCancel} disabled={deleting}>Cancel</Button>
+          <Button variant="destructive" className="rounded-xl" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Deleting...' : 'Delete Course'}
           </Button>
         </DialogFooter>
       </DialogContent>

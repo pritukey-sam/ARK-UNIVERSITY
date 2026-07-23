@@ -14,7 +14,7 @@ def get_hr_analytics(db: Session = Depends(get_db), current_user=Depends(require
         company_id = current_user.get("company_id")
         
         # 1. Workforce Stats
-        total_employees_query = db.query(User).filter(User.role == 'employee', User.is_active == True)
+        total_employees_query = db.query(User).filter(func.lower(User.role) == 'employee', User.is_active == True)
         total_assignments_query = db.query(Enrollment).join(User).filter(User.is_active == True)
         active_learners_query = db.query(User.id).join(Enrollment, User.id == Enrollment.user_id).filter(
             User.is_active == True
@@ -175,13 +175,13 @@ def get_dashboard_analytics(db: Session = Depends(get_db), current_user=Depends(
 
         # 4. Role Distribution
         role_dist = db.query(
-            User.role,
+            func.lower(User.role).label('role'),
             func.count(User.id).label('count')
         ).filter(User.is_active == True)
         
         if company_id:
             role_dist = role_dist.filter(User.company_id == company_id)
-        role_dist = role_dist.group_by(User.role).all()
+        role_dist = role_dist.group_by(func.lower(User.role)).all()
 
         # 5. Top Quiz Performers
         top_quizzes = db.query(

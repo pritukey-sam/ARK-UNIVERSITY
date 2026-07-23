@@ -4,7 +4,9 @@ from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(dotenv_path=env_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -34,12 +36,46 @@ def get_db():
         db.close()
 
 
+def log_audit_event(
+    db,
+    action: str,
+    actor_id: int = None,
+    target: str = None,
+    details: str = None,
+    company_id: int = None
+):
+    try:
+        from models import AuditLog, User
+        actor_name = "System"
+        actor_role = "system"
+        if actor_id:
+            user = db.query(User).filter(User.id == actor_id).first()
+            if user:
+                actor_name = user.name
+                actor_role = user.role
+        
+        audit_entry = AuditLog(
+            action=action,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            target=target,
+            details=details,
+            company_id=company_id
+        )
+        db.add(audit_entry)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error logging audit event: {e}")
+
+
+
 def create_tables():
     """Auto-create tables based on models"""
     try:
         from models import (User, Course, Module, Enrollment, UserProgress,
                             Video, Notes, Assignment, Quiz, Question,
-                            QuizAttempt, Submission, UserVideoProgress, AssignmentRequest, ActivityLog, Notification)
+                            QuizAttempt, Submission, UserVideoProgress, AssignmentRequest, ActivityLog, Notification, AuditLog, CourseAccessRequest)
         Base.metadata.create_all(bind=engine)
         
         # Manual migration for duration_seconds
@@ -123,6 +159,30 @@ def create_tables():
                 conn.execute(text("ALTER TABLE users ADD COLUMN country_code VARCHAR(10)"))
                 conn.commit()
             print("Added country_code column to users table")
+
+        if 'is_first_login' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_first_login BOOLEAN DEFAULT TRUE"))
+                conn.commit()
+            print("Added is_first_login column to users table")
+
+        if 'temp_password' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN temp_password VARCHAR(255)"))
+                conn.commit()
+            print("Added temp_password column to users table")
+
+        if 'reset_token' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN reset_token VARCHAR(255)"))
+                conn.commit()
+            print("Added reset_token column to users table")
+
+        if 'reset_token_expires_at' not in user_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN reset_token_expires_at TIMESTAMP WITH TIME ZONE"))
+                conn.commit()
+            print("Added reset_token_expires_at column to users table")
 
         # Company SaaS columns
         company_columns = [c['name'] for c in inspector.get_columns('companies')]
@@ -217,6 +277,14 @@ def create_tables():
                 conn.execute(text("ALTER TABLE courses ADD COLUMN completion_duration_days INTEGER DEFAULT 30"))
                 conn.commit()
             print("Added completion_duration_days column to courses table")
+
+        # Quiz columns
+        quiz_columns = [c['name'] for c in inspector.get_columns('quizzes')]
+        if 'time_limit' not in quiz_columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE quizzes ADD COLUMN time_limit INTEGER DEFAULT 20"))
+                conn.commit()
+            print("Added time_limit column to quizzes table")
 
         # AssignmentRequests columns
         if 'assignment_requests' in inspector.get_table_names():

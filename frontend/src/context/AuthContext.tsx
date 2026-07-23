@@ -1,25 +1,29 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 interface User {
- id: number;
- email: string;
- name: string;
- role: 'super_admin' | 'admin' | 'hr' | 'employee';
- company_id?: number;
- company_name?: string;
- employee_id?: string;
- plan_type?: 'free' | 'paid';
- plan_price?: number;
- payment_status?: 'pending' | 'completed';
- avatar_url?: string;
+  id: number;
+  email: string;
+  name: string;
+  role: 'super_admin' | 'admin' | 'hr' | 'employee';
+  company_id?: number;
+  company_name?: string;
+  employee_id?: string;
+  plan_type?: 'free' | 'paid';
+  plan_price?: number;
+  payment_status?: 'pending' | 'completed';
+  avatar_url?: string;
+  is_first_login?: boolean;
+  phone?: string;
+  country_code?: string;
 }
 
 interface AuthContextType {
  user: User | null;
- login: (token: string, user: User) => void;
- logout: () => void;
+ login: (user: User) => void;
+ logout: () => Promise<void>;
  updateUser: (user: User) => void;
  loading: boolean;
 }
@@ -30,30 +34,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
  const [user, setUser] = useState<User | null>(null);
  const [loading, setLoading] = useState(true);
 
- useEffect(() => {
- const storedUser = localStorage.getItem('user');
- const token = localStorage.getItem('token');
- if (storedUser && token) {
- setUser(JSON.parse(storedUser));
- }
- setLoading(false);
- }, []);
+  useEffect(() => {
+    const verifyToken = async () => {
+      try {
+        const freshUser = await api.common.getProfile();
+        setUser(freshUser);
+      } catch (e) {
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
 
- const login = (token: string, user: User) => {
- localStorage.setItem('token', token);
- localStorage.setItem('user', JSON.stringify(user));
- setUser(user);
+    verifyToken();
+  }, []);
+
+ const login = (user: User) => {
+   setUser(user);
  };
 
- const logout = () => {
- localStorage.removeItem('token');
- localStorage.removeItem('user');
- setUser(null);
+ const logout = async () => {
+   try {
+     await api.auth.logout();
+   } catch (e) {
+     console.error('Failed to log out from server', e);
+   }
+   setUser(null);
+   if (typeof window !== 'undefined') {
+     window.history.replaceState(null, '', '/login');
+   }
  };
 
  const updateUser = (updatedUser: User) => {
- localStorage.setItem('user', JSON.stringify(updatedUser));
- setUser(updatedUser);
+   setUser(updatedUser);
  };
 
  return (

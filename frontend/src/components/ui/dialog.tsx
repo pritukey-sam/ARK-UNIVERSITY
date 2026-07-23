@@ -38,11 +38,12 @@ const DialogContent = React.forwardRef<
  HTMLDivElement,
  DialogPrimitive.Popup.Props & {
  showCloseButton?: boolean
+ hideOverlay?: boolean
  }
->(({ className, children, showCloseButton = true, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, hideOverlay = false, ...props }, ref) => {
  return (
  <DialogPortal>
- <DialogOverlay />
+ {!hideOverlay && <DialogOverlay />}
  <DialogPrimitive.Popup
  ref={ref}
  data-slot="dialog-content"

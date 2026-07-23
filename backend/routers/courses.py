@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
+from validation import validate_and_log_upload, validate_video_url
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from typing import List, Optional
-from database import get_db
-from models import Course, Module, Enrollment, UserProgress, User, Video, Notes, Quiz, Assignment, Question
+from database import get_db, log_audit_event
+from models import Course, Module, Enrollment, UserProgress, User, Video, Notes, Quiz, Assignment, Question, UserVideoProgress, QuizAttempt, UserAnswer, AssignmentRequest, Submission, CourseAccessRequest
 from schemas import (
     CourseOut, CourseListOut, CourseCreate, CourseUpdate, CourseProgress, CourseStatsOut,
     VideoCreate, VideoOut, QuizCreate, QuizOut, ModuleUpdate, ModuleOut
@@ -104,6 +105,12 @@ def get_courses(
             ).all()
         }
 
+        user_requests = {
+            r.course_id: r.status for r in db.query(CourseAccessRequest).filter(
+                CourseAccessRequest.user_id == user_id
+            ).all()
+        }
+
         result = []
         for course in courses:
             module_stats = db.query(
@@ -163,7 +170,8 @@ def get_courses(
                 completion_duration_days=course.completion_duration_days,
                 due_date=due_date,
                 is_overdue=is_overdue,
-                assigned_at=assigned_at
+                assigned_at=assigned_at,
+                access_request_status=user_requests.get(course.id)
             ))
 
         # ── SORT BY PROGRESS (post-compute) ──
@@ -344,6 +352,13 @@ def get_course(course_id: int, db: Session = Depends(get_db), current_user=Depen
         ).first()
         is_enrolled = enrollment is not None
         
+        # Check course access request status
+        access_req = db.query(CourseAccessRequest).filter(
+            CourseAccessRequest.user_id == user_id,
+            CourseAccessRequest.course_id == course_id
+        ).first()
+        access_request_status = access_req.status if access_req else None
+
         due_date = None
         is_overdue = False
         assigned_at = None
@@ -426,6 +441,7 @@ def get_course(course_id: int, db: Session = Depends(get_db), current_user=Depen
             due_date=due_date,
             is_overdue=is_overdue,
             assigned_at=assigned_at,
+            access_request_status=access_request_status,
             modules=modules_out
         )
     except Exception as e:
@@ -446,9 +462,90 @@ def delete_course(course_id: int, db: Session = Depends(get_db), current_user=De
     course = query.first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    db.delete(course)
-    db.commit()
-    return {"message": "Course deleted successfully"}
+        
+    try:
+        # 1. Delete all Assignment Requests for this course
+        db.query(AssignmentRequest).filter(AssignmentRequest.course_id == course_id).delete(synchronize_session=False)
+
+        # 2. Delete all Enrollments for this course
+        db.query(Enrollment).filter(Enrollment.course_id == course_id).delete(synchronize_session=False)
+
+        # 3. Delete all UserProgress records for this course
+        db.query(UserProgress).filter(UserProgress.course_id == course_id).delete(synchronize_session=False)
+
+        # 4. Find all modules for this course
+        modules = db.query(Module).filter(Module.course_id == course_id).all()
+        module_ids = [m.id for m in modules]
+
+        if module_ids:
+            # 5. Delete Submissions
+            db.query(Submission).filter(Submission.module_id.in_(module_ids)).delete(synchronize_session=False)
+
+            # 6. Delete Assignments
+            db.query(Assignment).filter(Assignment.module_id.in_(module_ids)).delete(synchronize_session=False)
+
+            # 7. Delete Notes
+            db.query(Notes).filter(Notes.module_id.in_(module_ids)).delete(synchronize_session=False)
+
+            # 8. Find all videos for these modules
+            videos = db.query(Video).filter(Video.module_id.in_(module_ids)).all()
+            video_ids = [v.id for v in videos]
+            if video_ids:
+                # 9. Delete UserVideoProgress
+                db.query(UserVideoProgress).filter(UserVideoProgress.video_id.in_(video_ids)).delete(synchronize_session=False)
+                # 10. Delete Videos
+                db.query(Video).filter(Video.id.in_(video_ids)).delete(synchronize_session=False)
+
+            # 11. Find all quizzes for these modules
+            quizzes = db.query(Quiz).filter(Quiz.module_id.in_(module_ids)).all()
+            quiz_ids = [q.id for q in quizzes]
+            if quiz_ids:
+                # 12. Find questions and attempts
+                questions = db.query(Question).filter(Question.quiz_id.in_(quiz_ids)).all()
+                question_ids = [q.id for q in questions]
+
+                attempts = db.query(QuizAttempt).filter(QuizAttempt.quiz_id.in_(quiz_ids)).all()
+                attempt_ids = [a.id for a in attempts]
+
+                # 13. Delete UserAnswers
+                if attempt_ids or question_ids:
+                    ua_query = db.query(UserAnswer)
+                    if attempt_ids and question_ids:
+                        ua_query = ua_query.filter((UserAnswer.attempt_id.in_(attempt_ids)) | (UserAnswer.question_id.in_(question_ids)))
+                    elif attempt_ids:
+                        ua_query = ua_query.filter(UserAnswer.attempt_id.in_(attempt_ids))
+                    else:
+                        ua_query = ua_query.filter(UserAnswer.question_id.in_(question_ids))
+                    ua_query.delete(synchronize_session=False)
+
+                # 14. Delete QuizAttempts
+                if attempt_ids:
+                    db.query(QuizAttempt).filter(QuizAttempt.id.in_(attempt_ids)).delete(synchronize_session=False)
+
+                # 15. Delete Questions
+                if question_ids:
+                    db.query(Question).filter(Question.id.in_(question_ids)).delete(synchronize_session=False)
+
+                # 16. Delete Quizzes
+                db.query(Quiz).filter(Quiz.id.in_(quiz_ids)).delete(synchronize_session=False)
+
+            # 17. Delete Modules
+            db.query(Module).filter(Module.id.in_(module_ids)).delete(synchronize_session=False)
+
+        # 18. Finally delete the Course
+        course_title = course.title
+        db.delete(course)
+        db.commit()
+        log_audit_event(db, "Course Deleted", current_user["id"], course_title, f"Deleted course: '{course_title}' and all associated enrollments", company_id)
+        return {"message": "Course deleted successfully"}
+
+    except Exception as e:
+        db.rollback()
+        print(f"Error deleting course {course_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Course deletion failed: {str(e)}")
+
 
 # ── CREATE COURSE ──────────────────────────────────────────────────────────
 @router.post("", response_model=CourseOut)
@@ -457,6 +554,7 @@ def create_course(payload: CourseCreate, db: Session = Depends(get_db), current_
     course = Course(**payload.dict(), company_id=company_id, created_by=current_user["id"])
     db.add(course)
     db.commit()
+    log_audit_event(db, "Course Created", current_user["id"], course.title, f"Created new course: '{course.title}'", company_id)
     db.refresh(course)
     return get_course(course.id, db, current_user)
 
@@ -466,6 +564,12 @@ def create_course(payload: CourseCreate, db: Session = Depends(get_db), current_
 def enroll_course(course_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
+
+    if current_user.get("role") == "employee":
+        raise HTTPException(
+            status_code=403,
+            detail="Direct enrollment is disabled. Please request access through the Available Courses section."
+        )
 
     query = db.query(Course).filter(Course.id == course_id)
     if company_id:
@@ -508,6 +612,11 @@ def add_video(module_id: int, payload: VideoCreate, db: Session = Depends(get_db
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
         
+    try:
+        validate_video_url(payload.video_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     video = Video(module_id=module_id, title=payload.title, video_url=payload.video_url)
     db.add(video)
     db.commit()
@@ -515,11 +624,13 @@ def add_video(module_id: int, payload: VideoCreate, db: Session = Depends(get_db
     return video
 
 @router.post("/modules/{module_id}/notes")
-def add_notes(module_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+def add_notes(module_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
     company_id = current_user.get("company_id")
     module = db.query(Module).join(Course).filter(Module.id == module_id, Course.company_id == company_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
+
+    validate_and_log_upload(file, "document", db, request, current_user, "notes")
 
     file_url = save_file_locally(file, folder="notes")
     if not file_url:
@@ -532,11 +643,13 @@ def add_notes(module_id: int, file: UploadFile = File(...), db: Session = Depend
     return {"message": "Notes uploaded successfully", "url": file_url}
 
 @router.post("/modules/{module_id}/assignments")
-def add_assignment(module_id: int, title: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+def add_assignment(module_id: int, request: Request, title: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
     company_id = current_user.get("company_id")
     module = db.query(Module).join(Course).filter(Module.id == module_id, Course.company_id == company_id).first()
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
+
+    validate_and_log_upload(file, "document", db, request, current_user, "assignments")
 
     file_url = save_file_locally(file, folder="assignments")
     if not file_url:

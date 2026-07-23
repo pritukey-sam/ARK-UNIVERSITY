@@ -6,15 +6,21 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { 
-  User, Shield, Settings, Bell, Info,
-  Lock, Save, Loader2, Eye, EyeOff, Activity,
-  Moon, Sun, CheckCircle2, Monitor, Camera
+  User, Shield, Bell,
+  Lock, Save, Loader2, Eye, EyeOff, Camera, Trash2
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import { validateEmail, validatePhone, validateEmailField, validateName } from '@/lib/validation';
 import {
   Select,
   SelectContent,
@@ -88,10 +94,40 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('profile');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [avatarLoading, setAvatarLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleAvatarDelete = async () => {
+    setDeleteLoading(true);
+    try {
+      await api.common.deleteAvatar();
+      if (user) {
+        updateUser({ ...user, avatar_url: undefined });
+      }
+      toast.success('Profile photo removed');
+      setPreviewOpen(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to remove photo');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // File type validation (.jpg, .jpeg, .png, .webp)
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    
+    if (!allowedExtensions.includes(fileExtension) || !allowedTypes.includes(file.type)) {
+      toast.error('Only image files (.jpg, .jpeg, .png, .webp) are allowed');
+      return;
+    }
 
     if (file.size > 5 * 1024 * 1024) {
       toast.error('Image must be less than 5MB');
@@ -138,6 +174,19 @@ export default function SettingsPage() {
     phone: '',
     countryCode: '+91',
   });
+  const [nameError, setNameError] = useState<string | null>(null);
+
+  const handleNameChange = (val: string) => {
+    setProfileData(prev => ({ ...prev, name: val }));
+    const check = validateName(val);
+    setNameError(check.isValid ? null : (check.error || "Invalid name"));
+  };
+
+  const handleEmailFieldChange = (val: string) => {
+    setProfileData(prev => ({ ...prev, email: val }));
+    const check = validateEmailField(val);
+    setEmailError(check.isValid ? null : (check.error || "Invalid email address"));
+  };
 
   useEffect(() => {
     if (user) {
@@ -147,6 +196,9 @@ export default function SettingsPage() {
         phone: user.phone || '',
         countryCode: user.country_code || '+91',
       });
+      setNameError(null);
+      setEmailError(null);
+      setPhoneError(null);
     }
   }, [user]);
 
@@ -154,22 +206,34 @@ export default function SettingsPage() {
     e.preventDefault();
     if (!user) return;
     
-    // Proper Email Validation
-    const trimmedEmail = profileData.email.trim();
-    if (!trimmedEmail) {
-      return toast.error('Email address is required');
+    // Name Validation
+    const nameCheck = validateName(profileData.name);
+    if (!nameCheck.isValid) {
+      setNameError(nameCheck.error || "Invalid name");
+      return toast.error(nameCheck.error || "Invalid name");
     }
 
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      return toast.error('Please enter a valid email address (e.g. name@example.com)');
+    // Proper Email Validation
+    const emailCheck = validateEmailField(profileData.email);
+    if (!emailCheck.isValid) {
+      setEmailError(emailCheck.error || "Invalid email");
+      return toast.error(emailCheck.error || "Invalid email");
+    }
+
+    // Phone Number Validation (if entered, as it is labeled Optional in UI)
+    const phoneVal = profileData.phone.trim();
+    if (phoneVal) {
+      if (!validatePhone(phoneVal)) {
+        setPhoneError('Phone number must be exactly 10 digits');
+        return toast.error('Phone number must be exactly 10 digits');
+      }
     }
 
     setLoading(true);
     try {
       await api.common.updateProfile({ 
         name: profileData.name,
-        email: trimmedEmail,
+        email: profileData.email.trim(),
         phone: profileData.phone,
         country_code: profileData.countryCode
       });
@@ -178,7 +242,7 @@ export default function SettingsPage() {
       updateUser({ 
         ...user, 
         name: profileData.name,
-        email: trimmedEmail.toLowerCase(),
+        email: profileData.email.trim().toLowerCase(),
         phone: profileData.phone,
         country_code: profileData.countryCode
       });
@@ -193,7 +257,9 @@ export default function SettingsPage() {
 
   // 2. ACCOUNT & SECURITY
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
-  const [showPass, setShowPass] = useState(false);
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
 
   const handlePasswordSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -206,21 +272,15 @@ export default function SettingsPage() {
     
     setPassLoading(true);
     try {
-      // Real API integration attempt
-      await api.request(`/users/${user?.id}/password`, {
-        method: 'PUT',
-        body: JSON.stringify({ current_password: passwords.current, new_password: passwords.new })
+      // Real API integration to the correct patch profile endpoint
+      await api.request('/account/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ password: passwords.new })
       });
       toast.success('Password updated securely');
       setPasswords({ current: '', new: '', confirm: '' });
     } catch (error: any) {
-      // If endpoint doesn't exist, provide a graceful fallback for the UI requirement
-      if (error.status === 404) {
-        toast.success('Password update simulated (Endpoint not implemented)');
-        setPasswords({ current: '', new: '', confirm: '' });
-      } else {
-        toast.error(error.message || 'Failed to update password');
-      }
+      toast.error(error.message || 'Failed to update password');
     } finally {
       setPassLoading(false);
     }
@@ -257,13 +317,12 @@ export default function SettingsPage() {
     
     try {
       // Real API integration attempt (direct fetch to avoid global 404 logging spam)
-      const token = localStorage.getItem('token');
       const response = await fetch(`/api/users/${user.id}/preferences`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({ notifications: updated })
       });
 
@@ -296,18 +355,31 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <Card className="bg-white border border-gray-100 shadow-sm rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-gray-50 flex flex-col items-center text-center space-y-3">
-              <div className="relative">
-                <div className="w-20 h-20 rounded-full bg-orange-50 border-4 border-white shadow-sm flex items-center justify-center text-3xl font-black text-[#F26522] overflow-hidden">
+              <div id="tour-settings-profile-pic" className="relative group">
+                <div 
+                  onClick={() => setPreviewOpen(true)}
+                  className="w-20 h-20 rounded-full bg-orange-50 border-4 border-white shadow-sm flex items-center justify-center text-3xl font-black text-[#F26522] overflow-hidden cursor-pointer relative transition-all hover:scale-105"
+                  title="Click to view or manage profile photo"
+                >
                   {user?.avatar_url ? (
-                    <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                    <>
+                      <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-semibold">
+                        <Eye className="w-5 h-5 text-white" />
+                      </div>
+                    </>
                   ) : (
                     user?.name?.[0]?.toUpperCase() || 'A'
                   )}
                 </div>
                 <button 
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
                   disabled={avatarLoading}
-                  className="absolute bottom-0 right-0 w-6 h-6 bg-white rounded-full shadow-md border border-gray-100 flex items-center justify-center text-gray-500 hover:text-[#F26522] transition-colors"
+                  className="absolute bottom-0 right-0 w-6 h-6 bg-white rounded-full shadow-md border border-gray-100 flex items-center justify-center text-gray-500 hover:text-[#F26522] transition-colors cursor-pointer"
+                  title="Upload new photo"
                 >
                   {avatarLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Camera className="w-3 h-3" />}
                 </button>
@@ -325,12 +397,11 @@ export default function SettingsPage() {
               </div>
             </div>
             
-            <div className="p-3 space-y-1">
+            <div id="tour-settings-account-options" className="p-3 space-y-1">
               {[
                 { id: 'profile', icon: User, label: 'Profile Settings' },
-                { id: 'security', icon: Shield, label: 'Account & Security' },
+                { id: 'security', icon: Shield, label: 'Password' },
                 { id: 'notifications', icon: Bell, label: 'Notifications' },
-                { id: 'platform', icon: Info, label: 'Platform Info' },
               ].map(item => (
                 <button 
                   key={item.id}
@@ -355,7 +426,7 @@ export default function SettingsPage() {
           
           {/* 1. PROFILE SETTINGS */}
           {activeTab === 'profile' && (
-            <Card className="bg-white border border-gray-100 shadow-sm rounded-2xl overflow-hidden">
+            <Card id="tour-settings-profile-info" className="bg-white border border-gray-100 shadow-sm rounded-2xl overflow-hidden">
               <CardHeader className="border-b border-gray-50 bg-white p-6">
                 <CardTitle className="text-xl font-black text-gray-900">Profile Settings</CardTitle>
                 <p className="text-sm text-gray-500 font-medium mt-1">Manage your administrative identity and contact details.</p>
@@ -367,20 +438,34 @@ export default function SettingsPage() {
                       <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Full Name</Label>
                       <Input 
                         value={profileData.name} 
-                        onChange={e => setProfileData({...profileData, name: e.target.value})} 
-                        className="border-gray-200 h-11 rounded-xl" 
+                        onChange={e => handleNameChange(e.target.value)} 
+                        onBlur={e => handleNameChange(e.target.value)}
+                        className={cn(
+                          "border-gray-200 h-11 rounded-xl focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200",
+                          nameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500"
+                        )}
                         required
                       />
+                      {nameError && (
+                        <p className="text-red-500 text-xs mt-1 font-bold">{nameError}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Email Address</Label>
                       <Input 
                         value={profileData.email} 
-                        onChange={e => setProfileData({...profileData, email: e.target.value})} 
-                        className="border-gray-200 h-11 rounded-xl" 
+                        onChange={e => handleEmailFieldChange(e.target.value)}
+                        onBlur={e => handleEmailFieldChange(e.target.value)}
+                        className={cn(
+                          "border-gray-200 h-11 rounded-xl focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200",
+                          emailError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500"
+                        )}
                         required
                         type="email"
                       />
+                      {emailError && (
+                        <p className="text-red-500 text-xs mt-1 font-bold">{emailError}</p>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -388,10 +473,10 @@ export default function SettingsPage() {
                     <div className="flex gap-2 max-w-md">
                       <Select 
                         value={profileData.countryCode} 
-                        onValueChange={v => setProfileData({...profileData, countryCode: v})}
+                        onValueChange={v => setProfileData({...profileData, countryCode: v as string})}
                       >
                         <SelectTrigger className="w-[140px] h-11 rounded-xl border-gray-200 font-bold">
-                          <SelectValue placeholder="Code" />
+                           <SelectValue placeholder="Code" />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl border-gray-100 shadow-xl max-h-[300px]">
                           <ScrollArea className="h-full">
@@ -410,15 +495,38 @@ export default function SettingsPage() {
                       </Select>
                       <Input 
                         value={profileData.phone} 
-                        onChange={e => setProfileData({...profileData, phone: e.target.value})} 
-                        placeholder="555 000-0000"
-                        className="flex-1 border-gray-200 h-11 rounded-xl" 
+                        onChange={e => {
+                          const cleanVal = e.target.value.replace(/\D/g, '').slice(0, 10);
+                          setProfileData({...profileData, phone: cleanVal});
+                          if (cleanVal && cleanVal.length !== 10) {
+                            setPhoneError("Phone number must be exactly 10 digits");
+                          } else {
+                            setPhoneError(null);
+                          }
+                        }}
+                        onBlur={e => {
+                          const val = e.target.value;
+                          if (val && val.length !== 10) {
+                            setPhoneError("Phone number must be exactly 10 digits");
+                          } else {
+                            setPhoneError(null);
+                          }
+                        }}
+                        maxLength={10}
+                        placeholder="9876543210"
+                        className={cn(
+                          "flex-1 border-gray-200 h-11 rounded-xl",
+                          phoneError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500"
+                        )} 
                       />
                     </div>
+                    {phoneError && (
+                      <p className="text-red-500 text-xs mt-1 font-bold">{phoneError}</p>
+                    )}
                   </div>
 
                   <div className="flex justify-end pt-4">
-                    <Button type="submit" disabled={loading} className="bg-[#F26522] hover:bg-[#D54D10] text-white font-bold h-11 px-8 rounded-xl shadow-lg shadow-orange-100 transition-all">
+                    <Button type="submit" disabled={loading || !!nameError || !!emailError || !!phoneError} className="bg-[#F26522] hover:bg-[#D54D10] text-white font-bold h-11 px-8 rounded-xl shadow-lg shadow-orange-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                       {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
                       Save Profile Changes
                     </Button>
@@ -432,7 +540,7 @@ export default function SettingsPage() {
           {activeTab === 'security' && (
             <Card className="bg-white border border-gray-100 shadow-sm rounded-2xl overflow-hidden">
               <CardHeader className="border-b border-gray-50 bg-white p-6">
-                <CardTitle className="text-xl font-black text-gray-900">Account & Security</CardTitle>
+                <CardTitle className="text-xl font-black text-gray-900">Password</CardTitle>
                 <p className="text-sm text-gray-500 font-medium mt-1">Ensure your administrative access remains secure.</p>
               </CardHeader>
               <CardContent className="p-6">
@@ -441,42 +549,50 @@ export default function SettingsPage() {
                     <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Current Password</Label>
                     <div className="relative">
                       <Input 
-                        type={showPass ? "text" : "password"}
+                        type={showCurrentPass ? "text" : "password"}
                         value={passwords.current}
                         onChange={e => setPasswords({...passwords, current: e.target.value})}
                         placeholder="••••••••" 
                         className="border-gray-200 h-11 rounded-xl pr-10" 
                         required
                       />
+                      <button type="button" onClick={() => setShowCurrentPass(!showCurrentPass)} className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-gray-400 hover:text-gray-600 focus:outline-none" tabIndex={-1} aria-label={showCurrentPass ? "Hide password" : "Show password"}>
+                        {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">New Password</Label>
                     <div className="relative">
                       <Input 
-                        type={showPass ? "text" : "password"}
+                        type={showNewPass ? "text" : "password"}
                         value={passwords.new}
                         onChange={e => setPasswords({...passwords, new: e.target.value})}
                         placeholder="••••••••" 
                         className="border-gray-200 h-11 rounded-xl pr-10" 
                         required
                       />
-                      <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                        {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      <button type="button" onClick={() => setShowNewPass(!showNewPass)} className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-gray-400 hover:text-gray-600 focus:outline-none" tabIndex={-1} aria-label={showNewPass ? "Hide password" : "Show password"}>
+                        {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                     <p className="text-[10px] text-gray-400 font-medium mt-1">Must be at least 8 characters long.</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Confirm New Password</Label>
-                    <Input 
-                      type={showPass ? "text" : "password"}
-                      value={passwords.confirm}
-                      onChange={e => setPasswords({...passwords, confirm: e.target.value})}
-                      placeholder="••••••••" 
-                      className="border-gray-200 h-11 rounded-xl" 
-                      required
-                    />
+                    <div className="relative">
+                      <Input 
+                        type={showConfirmPass ? "text" : "password"}
+                        value={passwords.confirm}
+                        onChange={e => setPasswords({...passwords, confirm: e.target.value})}
+                        placeholder="••••••••" 
+                        className="border-gray-200 h-11 rounded-xl pr-10" 
+                        required
+                      />
+                      <button type="button" onClick={() => setShowConfirmPass(!showConfirmPass)} className="absolute right-3 top-1/2 -translate-y-1/2 z-10 text-gray-400 hover:text-gray-600 focus:outline-none" tabIndex={-1} aria-label={showConfirmPass ? "Hide password" : "Show password"}>
+                        {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <div className="pt-2">
                     <Button type="submit" disabled={passLoading} className="bg-gray-900 hover:bg-gray-800 text-white font-bold h-11 px-8 rounded-xl shadow-md w-full transition-all">
@@ -538,66 +654,55 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {/* 4. PLATFORM INFORMATION */}
-          {activeTab === 'platform' && (
-            <Card className="bg-white border border-gray-100 shadow-sm rounded-2xl overflow-hidden">
-              <CardHeader className="border-b border-gray-50 bg-white p-6">
-                <CardTitle className="text-xl font-black text-gray-900">Platform Information</CardTitle>
-                <p className="text-sm text-gray-500 font-medium mt-1">Operational details and system integrity status.</p>
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-white rounded-lg shadow-sm">
-                        <Monitor className="w-5 h-5 text-gray-700" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Platform Identity</p>
-                        <p className="text-sm font-bold text-gray-900">Lumina LMS Enterprise</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-white rounded-lg shadow-sm">
-                        <Settings className="w-5 h-5 text-gray-700" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">System Version</p>
-                        <p className="text-sm font-bold text-gray-900">v4.2.0 (Stable Build)</p>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="p-5 bg-emerald-50/50 rounded-xl border border-emerald-100 space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-white rounded-lg shadow-sm">
-                        <Activity className="w-5 h-5 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">API Status</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          <p className="text-sm font-bold text-emerald-700">All Systems Operational</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-white rounded-lg shadow-sm">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Last Sync Validation</p>
-                        <p className="text-sm font-bold text-gray-900">{new Date().toLocaleString()}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
         </div>
       </div>
+
+      {/* Profile Photo View & Manage Modal */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="sm:max-w-md bg-white rounded-2xl p-6 border border-gray-100 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-900 text-center">Profile Photo</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center space-y-6 my-2">
+            <div className="w-56 h-56 rounded-2xl overflow-hidden border-4 border-gray-100 shadow-lg bg-gray-50 flex items-center justify-center">
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="Full Profile" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-6xl font-black text-[#F26522]">{user?.name?.[0]?.toUpperCase() || 'A'}</span>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+              <Button
+                type="button"
+                onClick={() => {
+                  setPreviewOpen(false);
+                  fileInputRef.current?.click();
+                }}
+                className="w-full sm:w-auto bg-[#F26522] hover:bg-[#d55418] text-white font-bold px-5 py-2.5 rounded-xl shadow-md flex items-center justify-center gap-2 text-sm transition-all"
+              >
+                <Camera className="w-4 h-4" />
+                Upload New Photo
+              </Button>
+
+              {user?.avatar_url && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAvatarDelete}
+                  disabled={deleteLoading}
+                  className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-bold px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm transition-all"
+                >
+                  {deleteLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Remove Photo
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

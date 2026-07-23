@@ -1,7 +1,7 @@
 {
   "name": "lumina-lms",
   "version": "1.0.0",
-  "description": "Lumina LMS - Next.js & FastAPI",
+  "description": "ARK University LMS - Next.js & FastAPI",
   "scripts": {
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && python main.py",

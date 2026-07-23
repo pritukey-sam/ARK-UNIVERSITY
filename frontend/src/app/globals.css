@@ -35,4 +35,77 @@
     outline: none !important;
     box-shadow: none !important;
   }
+
+  /* Fix input and textarea focus/blur border behavior to be consistent at all times */
+  input, textarea {
+    --input-border-color: #e5e7eb; /* Default to border-gray-200 color */
+  }
+
+  /* Map common border utility classes to the custom property */
+  input.border-gray-200, textarea.border-gray-200 { --input-border-color: #e5e7eb; }
+  input.border-gray-100, textarea.border-gray-100 { --input-border-color: #f3f4f6; }
+  input.border-zinc-100, textarea.border-zinc-100 { --input-border-color: #f4f4f5; }
+  input.border-slate-100, textarea.border-slate-100 { --input-border-color: #f1f5f9; }
+  input.border-input, textarea.border-input { --input-border-color: #e5e7eb; }
+  input.border-\[\#eee\], textarea.border-\[\#eee\] { --input-border-color: #eeeeee; }
+  input.border-white\/10, textarea.border-white\/10 { --input-border-color: rgba(255, 255, 255, 0.1); }
+
+  /* Apply the border color and prevent any change on focus/active */
+  input, textarea {
+    border-color: var(--input-border-color) !important;
+    transition: none !important;
+  }
+
+  input:focus, textarea:focus,
+  input:focus-within, textarea:focus-within,
+  input:focus-visible, textarea:focus-visible,
+  input:active, textarea:active {
+    border-color: var(--input-border-color) !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Suppress browser-native password reveal buttons for cross-browser consistency */
+  input[type="password"]::-ms-reveal,
+  input[type="password"]::-ms-clear {
+    display: none !important;
+  }
+  input[type="password"]::-webkit-credentials-auto-fill-button,
+  input[type="password"]::-webkit-textfield-decoration-container {
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
+
+/* Premium Infinite Scrolling Marquee for Sidebar Project Title */
+.marquee-container {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, 1) 12%, rgba(0, 0, 0, 1) 88%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, 1) 12%, rgba(0, 0, 0, 1) 88%, transparent);
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 24s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+

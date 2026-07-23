@@ -2,14 +2,15 @@
 
 import React, { useState, useEffect, use, useRef, Suspense } from 'react';
 import { api } from '@/lib/api';
+import DeleteConfirmDialog from '@/components/common/DeleteConfirmDialog';
 import BackNavigation from '@/components/common/BackNavigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { 
-  PlayCircle, CheckCircle2, Video, 
+import {
+  PlayCircle, CheckCircle2, Video,
   ExternalLink, Loader2, Clock,
   ChevronRight, Bookmark, Trophy,
   FileText, Download, List,
@@ -33,10 +34,13 @@ declare global {
   }
 }
 
+const thumbnailCache: Record<string, string> = {};
+
 function VideoThumbnail({ video }: { video: any }) {
   const thumbnailPlaceholder = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60`;
   const [realUrl, setRealUrl] = useState<string | null>(null);
   const [videoError, setVideoError] = useState(false);
+  const [capturedThumbnail, setCapturedThumbnail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!video || !video.video_url) return;
@@ -66,6 +70,68 @@ function VideoThumbnail({ video }: { video: any }) {
     }
   }, [video]);
 
+  useEffect(() => {
+    if (!realUrl) return;
+
+    // Check if YouTube or Cloudflare
+    const isYt = video.video_url.includes('youtube.com') || video.video_url.includes('youtu.be') || video.video_url.includes('youtube-nocookie.com');
+    const isCf = video.video_url.includes('cloudflarestream.com') || video.video_url.includes('videodelivery.net');
+    if (isYt || isCf) return;
+
+    if (thumbnailCache[realUrl]) {
+      setCapturedThumbnail(thumbnailCache[realUrl]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const videoEl = document.createElement('video');
+    videoEl.src = realUrl;
+    videoEl.crossOrigin = 'anonymous'; // Important for CORS
+    videoEl.preload = 'auto';
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoEl.currentTime = 0; // Seek to 0 seconds
+
+    const handleCapture = () => {
+      if (isCancelled) return;
+      if (videoEl.videoWidth === 0 || videoEl.videoHeight === 0) return;
+
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg');
+          thumbnailCache[realUrl] = dataUrl;
+          setCapturedThumbnail(dataUrl);
+        }
+      } catch (err) {
+        console.error("Failed to capture video frame via canvas:", err);
+      }
+    };
+
+    videoEl.addEventListener('loadeddata', handleCapture);
+    videoEl.addEventListener('seeked', handleCapture);
+    videoEl.addEventListener('error', (err) => {
+      console.warn("Video element failed to load for thumbnail capture:", err);
+    });
+
+    videoEl.load();
+
+    return () => {
+      isCancelled = true;
+      videoEl.removeEventListener('loadeddata', handleCapture);
+      videoEl.removeEventListener('seeked', handleCapture);
+      videoEl.src = '';
+      try {
+        videoEl.load();
+      } catch (e) {}
+    };
+  }, [realUrl, video]);
+
   if (!video) {
     return <img src={thumbnailPlaceholder} alt="Placeholder" className="w-full h-full object-cover" />;
   }
@@ -75,9 +141,9 @@ function VideoThumbnail({ video }: { video: any }) {
   if (ytMatch && ytMatch[1] && ytMatch[1].trim().length === 11) {
     const ytId = ytMatch[1].trim();
     return (
-      <img 
-        src={`https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`} 
-        alt={video.title} 
+      <img
+        src={`https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`}
+        alt={video.title}
         className="w-full h-full object-cover"
         onError={(e) => {
           (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
@@ -91,7 +157,7 @@ function VideoThumbnail({ video }: { video: any }) {
   if (cfMatch && cfMatch[1]) {
     const cfId = cfMatch[1];
     return (
-      <img 
+      <img
         src={`https://videodelivery.net/${cfId}/thumbnails/thumbnail.jpg?time=2s&height=360`}
         alt={video.title}
         className="w-full h-full object-cover"
@@ -102,22 +168,25 @@ function VideoThumbnail({ video }: { video: any }) {
     );
   }
 
-  // 3. Render HTML5 video preview using full signed URL
-  if (videoError || !realUrl) {
-    return <img src={thumbnailPlaceholder} alt="Placeholder" className="w-full h-full object-cover" />;
+  // Render captured static thumbnail image if available
+  if (capturedThumbnail) {
+    return <img src={capturedThumbnail} alt={video.title} className="w-full h-full object-cover" />;
   }
 
-  return (
-    <video 
-      src={`${realUrl}#t=0.5`}
-      preload="auto"
-      muted
-      playsInline
-      poster={thumbnailPlaceholder}
-      onError={() => setVideoError(true)}
-      className="w-full h-full object-cover pointer-events-none"
-    />
-  );
+  // Fallback to video element at t=0.001 seconds during loading or if canvas capture fails
+  if (realUrl && !videoError) {
+    return (
+      <video
+        src={`${realUrl}#t=0.001`}
+        preload="metadata"
+        muted
+        playsInline
+        className="w-full h-full object-cover pointer-events-none"
+      />
+    );
+  }
+
+  return <img src={thumbnailPlaceholder} alt={video.title} className="w-full h-full object-cover" />;
 }
 
 // Separate component for the content to use useSearchParams safely with Suspense
@@ -125,23 +194,27 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
-  
+
   const activeTab = searchParams.get('tab') || 'video';
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  
+
   const [module, setModule] = useState<any>(null);
   const [course, setCourse] = useState<any>(null);
+  const [modules, setModules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedVideo, setSelectedVideo] = useState<any>(null);
   const [quizzesData, setQuizzesData] = useState<Record<number, any>>({});
   const [apiReady, setApiReady] = useState(false);
   const [secureVideoUrl, setSecureVideoUrl] = useState<string | null>(null);
   const [videoLoadingError, setVideoLoadingError] = useState<string | null>(null);
+  const [videoFinished, setVideoFinished] = useState(false);
 
   // Manage UI flows
   const [activeUploadType, setActiveUploadType] = useState<'video' | 'notes' | 'task' | 'quiz' | null>(null);
   const [createDropdownOpen, setCreateDropdownOpen] = useState(false);
   const [editingVideo, setEditingVideo] = useState<any>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id: number } | null>(null);
 
   // Upload Form states
   const [videoTitle, setVideoTitle] = useState('');
@@ -162,6 +235,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
 
   const [quizFile, setQuizFile] = useState<File | null>(null);
   const [uploadingQuiz, setUploadingQuiz] = useState(false);
+  const [quizDuration, setQuizDuration] = useState<number>(20);
 
   const playerInstance = useRef<any>(null);
   const playerReady = useRef(false);
@@ -173,7 +247,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
     if (window.YT && window.YT.Player) setApiReady(true);
 
     return () => {
-      if (playerInstance.current) try { playerInstance.current.destroy(); } catch (e) {}
+      if (playerInstance.current) try { playerInstance.current.destroy(); } catch (e) { }
     };
   }, [moduleId]);
 
@@ -236,16 +310,18 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [moduleRes, courseRes] = await Promise.all([
+      const [moduleRes, courseRes, modulesRes] = await Promise.all([
         api.common.getModule(parseInt(moduleId)),
-        api.common.getCourse(parseInt(id))
+        api.common.getCourse(parseInt(id)),
+        api.common.getModulesByCourse(parseInt(id))
       ]);
       setModule(moduleRes);
       setCourse(courseRes);
-      
+      setModules(modulesRes || []);
+
       // Do not automatically open a video lesson — show grid first
       setSelectedVideo(null);
-      
+
       if (moduleRes.quizzes?.length > 0) {
         const quizPromises = moduleRes.quizzes.map((q: any) => api.common.getQuiz(q.id));
         const quizResults = await Promise.all(quizPromises);
@@ -277,6 +353,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
     if (playerInstance.current) {
       try {
         if (playerReady.current) {
+          setVideoFinished(false);
           playerInstance.current.loadVideoById(videoId);
           return;
         }
@@ -293,10 +370,10 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
         height: '100%',
         width: '100%',
         videoId: videoId,
-        playerVars: { 
+        playerVars: {
           'playsinline': 1,
           'modestbranding': 1,
-          'rel': 0, 
+          'rel': 0,
           'autoplay': 1,
           'enablejsapi': 1,
           'showinfo': 0,
@@ -305,6 +382,11 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
         events: {
           'onReady': () => {
             playerReady.current = true;
+          },
+          'onStateChange': (event: any) => {
+            if (event.data === 0) {
+              setVideoFinished(true);
+            }
           }
         }
       });
@@ -317,6 +399,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
     if (selectedVideo && selectedVideo.video_url && activeTab === 'video') {
       setSecureVideoUrl(null);
       setVideoLoadingError(null);
+      setVideoFinished(false);
       if (getYouTubeId(selectedVideo.video_url)) {
         setSecureVideoUrl(selectedVideo.video_url);
       } else {
@@ -343,7 +426,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
   const handleTabChange = (tabId: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', tabId);
-    router.push(`?${params.toString()}`, { scroll: false });
+    router.replace(`?${params.toString()}`, { scroll: false });
   };
 
   // Upload actions
@@ -352,7 +435,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
     try {
       setUploadingVideo(true);
       let finalUrl = '';
-      
+
       if (videoMode === 'upload') {
         if (videoFile) {
           const formData = new FormData();
@@ -384,15 +467,15 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
         });
         toast.success('Video updated successfully');
       } else {
-        await api.admin.addVideo(parseInt(moduleId), { 
-          title: videoTitle, 
-          video_url: finalUrl, 
+        await api.admin.addVideo(parseInt(moduleId), {
+          title: videoTitle,
+          video_url: finalUrl,
           duration_seconds: parseDuration(videoDuration),
           description: videoDescription
         });
         toast.success('Video added successfully');
       }
-      
+
       setVideoFile(null);
       setExternalVideoUrl('');
       setVideoTitle('');
@@ -459,7 +542,10 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
         setUploadingQuiz(false);
         return;
       }
-      await api.admin.bulkQuizConfirm(parseInt(moduleId), { questions: validQuestions });
+      await api.admin.bulkQuizConfirm(parseInt(moduleId), { 
+        questions: validQuestions,
+        time_limit: Math.max(1, Math.min(180, quizDuration || 20))
+      });
       toast.success('Quiz imported successfully');
       setQuizFile(null);
       fetchData();
@@ -472,7 +558,6 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
   };
 
   const handleDeleteItem = async (type: string, itemId: number) => {
-    if (!window.confirm("Are you sure you want to delete this resource? This action cannot be undone.")) return;
     try {
       if (type === 'video') await api.admin.deleteVideo(itemId);
       if (type === 'notes') await api.admin.deleteNotes(itemId);
@@ -492,10 +577,10 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
       const idx = url.indexOf('/uploads/');
       targetUrl = url.substring(idx);
     }
-    
+
     // Append the download parameter so the backend knows to attach instead of preview
     const downloadUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 'download=true';
-    
+
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = filename || '';
@@ -514,17 +599,25 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
 
   return (
     <div className="min-h-screen bg-white font-sans text-[#111]">
-      
+
       {/* 1. CLEAN REFINED HEADER */}
       <header className="h-16 border-b border-gray-200 bg-white flex items-center px-6 sticky top-0 z-[100] shadow-sm">
         <div className="flex items-center gap-6 w-full max-w-7xl mx-auto">
           <Button
             variant="ghost"
             onClick={() => {
-              if (selectedVideo !== null) {
+              if (activeUploadType !== null) {
+                setActiveUploadType(null);
+                setEditingVideo(null);
+                setVideoFile(null);
+                setExternalVideoUrl('');
+                setVideoTitle('');
+                setVideoDuration('');
+                setVideoDescription('');
+              } else if (selectedVideo !== null) {
                 setSelectedVideo(null);
               } else {
-                router.back();
+                router.push(`/courses/${id}`);
               }
             }}
             className="flex items-center gap-2 h-auto px-0 py-1 text-sm font-medium text-[#6A6F73] hover:text-[#111] hover:bg-transparent transition-colors group"
@@ -534,7 +627,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
             </div>
             <span>Back</span>
           </Button>
-          
+
           <div className="flex-1" />
 
           <div className="flex items-center gap-4">
@@ -581,9 +674,18 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
 
       {/* 2. MAIN FULL WIDTH PREVIEW LAYOUT */}
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
-        
+
         {/* Module Title Header */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          {(() => {
+            const idx = modules.findIndex(m => m.id === module?.id);
+            const moduleNumberLabel = idx !== -1 ? `Module ${idx + 1}` : "Module";
+            return (
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
+                {moduleNumberLabel}
+              </span>
+            );
+          })()}
           <h1 className="text-2xl font-bold text-[#111] tracking-tight">{module.title}</h1>
         </div>
 
@@ -622,19 +724,19 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
         {/* 4. MAIN CONTENT WORKSPACE */}
         <div className="min-h-[500px] pt-4">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-[#F26522]" /></div>}>
-            
+
             {/* IF INLINE UPLOAD MODE ACTIVE */}
             {activeUploadType !== null ? (
               <div className="bg-white border border-[#eee] rounded-2xl p-8 max-w-2xl mx-auto space-y-6 shadow-md animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="flex items-center justify-between pb-4 border-b border-gray-100">
                   <h3 className="text-lg font-bold text-gray-900 capitalize">
-                    {activeUploadType === 'video' ? (editingVideo ? 'Edit Video Lecture' : 'Add Video Lecture') : 
-                     activeUploadType === 'notes' ? 'Upload PDF Notes' : 
-                     activeUploadType === 'task' ? 'Create Deliverable Task' : 
-                     'Import Bulk Quiz'}
+                    {activeUploadType === 'video' ? (editingVideo ? 'Edit Video Lecture' : 'Add Video Lecture') :
+                      activeUploadType === 'notes' ? 'Upload PDF Notes' :
+                        activeUploadType === 'task' ? 'Create Deliverable Task' :
+                          'Import Bulk Quiz'}
                   </h3>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     onClick={() => {
                       setActiveUploadType(null);
                       setEditingVideo(null);
@@ -654,17 +756,17 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                 {activeUploadType === 'video' && (
                   <div className="space-y-4">
                     <div className="flex bg-gray-100 p-1 rounded-lg w-max">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className={cn("h-7 px-3 text-xs font-bold rounded-md", videoMode === 'upload' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500")}
                         onClick={() => setVideoMode('upload')}
                       >
                         Upload File
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className={cn("h-7 px-3 text-xs font-bold rounded-md", videoMode === 'link' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500")}
                         onClick={() => setVideoMode('link')}
                       >
@@ -675,17 +777,18 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                     <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-gray-500 uppercase">Video Title</Label>
-                        <Input value={videoTitle || ""} onChange={e=>setVideoTitle(e.target.value)} className="h-10 text-sm border-[#eee] rounded-lg" placeholder="e.g. Introduction to 3D Space" />
+                        <Input value={videoTitle || ""} onChange={e => setVideoTitle(e.target.value)} className="h-10 text-sm border-[#eee] rounded-lg" placeholder="e.g. Introduction to 3D Space" />
                       </div>
+                      {videoMode === 'link' && (
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-gray-500 uppercase">Duration (e.g. 15, 1:30, 1:20:30)</Label>
                         <div className="relative">
-                          <Input 
-                            type="text" 
-                            value={videoDuration || ""} 
-                            onChange={e=>setVideoDuration(e.target.value)} 
-                            className="h-10 text-sm border-[#eee] rounded-lg pr-20" 
-                            placeholder="e.g. 15 or 1:30" 
+                          <Input
+                            type="text"
+                            value={videoDuration || ""}
+                            onChange={e => setVideoDuration(e.target.value)}
+                            className="h-10 text-sm border-[#eee] rounded-lg pr-20"
+                            placeholder="e.g. 15 or 1:30"
                           />
                           {isFetchingDuration && (
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] text-orange-500 font-bold bg-white px-1">
@@ -695,23 +798,24 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                           )}
                         </div>
                       </div>
+                      )}
                       <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-gray-500 uppercase">Video Description</Label>
-                        <Textarea 
-                          value={videoDescription || ""} 
-                          onChange={e=>setVideoDescription(e.target.value)} 
-                          className="min-h-[100px] text-sm border-[#eee] rounded-lg" 
-                          placeholder="Explain what is covered in this lesson..." 
+                        <Textarea
+                          value={videoDescription || ""}
+                          onChange={e => setVideoDescription(e.target.value)}
+                          className="min-h-[100px] text-sm border-[#eee] rounded-lg"
+                          placeholder="Explain what is covered in this lesson..."
                         />
                       </div>
-                      
+
                       <div className="mt-2">
                         {videoMode === 'upload' ? (
                           <div className="flex gap-3 items-center">
                             <input type="file" accept="video/mp4" onChange={e => setVideoFile(e.target.files?.[0] || null)} className="h-10 text-sm border border-[#eee] bg-transparent px-2.5 py-1 rounded-lg flex-1 file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground outline-none" />
-                            <Button 
-                              onClick={handleUploadVideo} 
-                              disabled={(!videoFile && !editingVideo) || !videoTitle || uploadingVideo} 
+                            <Button
+                              onClick={handleUploadVideo}
+                              disabled={(!videoFile && !editingVideo) || !videoTitle || uploadingVideo}
                               className="h-10 bg-[#F26522] hover:bg-[#D54D10] text-white px-6 rounded-lg font-bold text-xs uppercase"
                             >
                               {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingVideo ? "Save Changes" : "Upload")}
@@ -719,16 +823,16 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                           </div>
                         ) : (
                           <div className="flex gap-3 items-start">
-                            <Input 
-                              type="url" 
-                              value={externalVideoUrl || ""} 
-                              onChange={e => setExternalVideoUrl(e.target.value)} 
-                              className="h-10 text-sm border-[#eee] rounded-lg flex-1" 
-                              placeholder="Paste YouTube or direct video URL" 
+                            <Input
+                              type="url"
+                              value={externalVideoUrl || ""}
+                              onChange={e => setExternalVideoUrl(e.target.value)}
+                              className="h-10 text-sm border-[#eee] rounded-lg flex-1"
+                              placeholder="Paste YouTube or direct video URL"
                             />
-                            <Button 
-                              onClick={handleUploadVideo} 
-                              disabled={!externalVideoUrl || !videoTitle || uploadingVideo} 
+                            <Button
+                              onClick={handleUploadVideo}
+                              disabled={!externalVideoUrl || !videoTitle || uploadingVideo}
                               className="h-10 bg-[#F26522] hover:bg-[#D54D10] text-white px-6 rounded-lg font-bold text-xs uppercase"
                             >
                               {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingVideo ? "Save Changes" : "Save Link")}
@@ -760,7 +864,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                   <div className="space-y-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-bold text-gray-500 uppercase">Assignment Title</Label>
-                      <Input value={taskTitle || ""} onChange={e=>setTaskTitle(e.target.value)} className="h-10 text-sm border-[#eee] rounded-lg" placeholder="e.g. Final Portfolio Submission" />
+                      <Input value={taskTitle || ""} onChange={e => setTaskTitle(e.target.value)} className="h-10 text-sm border-[#eee] rounded-lg" placeholder="e.g. Final Portfolio Submission" />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-bold text-gray-500 uppercase">Instructions Document</Label>
@@ -781,8 +885,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                       <Label className="text-xs font-bold text-gray-500 uppercase">Import Excel Template</Label>
                       <Button variant="link" size="sm" className="h-auto p-0 text-xs font-bold text-[#F26522]" onClick={async () => {
                         try {
-                          const token = localStorage.getItem('token');
-                          const response = await fetch('/api/quizzes/sample-template', { headers: { 'Authorization': `Bearer ${token}` } });
+                          const response = await fetch('/api/quizzes/sample-template', { credentials: 'include' });
                           const blob = await response.blob();
                           const url = window.URL.createObjectURL(blob);
                           const a = document.createElement('a');
@@ -796,11 +899,28 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                         Download Excel Template
                       </Button>
                     </div>
-                    <div className="flex gap-3 items-center">
-                      <input type="file" accept=".xlsx,.xls,.csv" onChange={e => setQuizFile(e.target.files?.[0] || null)} className="h-10 text-sm border border-[#eee] bg-transparent px-2.5 py-1 rounded-lg flex-1 file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground outline-none" />
-                      <Button onClick={handleUploadQuizBulk} disabled={!quizFile || uploadingQuiz} className="h-10 bg-[#F26522] hover:bg-[#D54D10] text-white px-6 rounded-lg font-bold text-xs uppercase">
-                        {uploadingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import Quiz"}
-                      </Button>
+                    <div className="space-y-4">
+                      <div className="space-y-1.5 max-w-xs">
+                        <Label className="text-xs font-bold text-gray-500 uppercase">Quiz Duration (Minutes)</Label>
+                        <Input 
+                          type="number"
+                          min={1}
+                          max={180}
+                          value={quizDuration}
+                          onChange={e => {
+                            const val = parseInt(e.target.value);
+                            setQuizDuration(isNaN(val) ? 20 : val);
+                          }}
+                          className="h-10 text-sm border border-[#eee] bg-transparent rounded-lg"
+                          placeholder="e.g. 20"
+                        />
+                      </div>
+                      <div className="flex gap-3 items-center">
+                        <input type="file" accept=".xlsx,.xls,.csv" onChange={e => setQuizFile(e.target.files?.[0] || null)} className="h-10 text-sm border border-[#eee] bg-transparent px-2.5 py-1 rounded-lg flex-1 file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground outline-none" />
+                        <Button onClick={handleUploadQuizBulk} disabled={!quizFile || uploadingQuiz} className="h-10 bg-[#F26522] hover:bg-[#D54D10] text-white px-6 rounded-lg font-bold text-xs uppercase">
+                          {uploadingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import Quiz"}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -814,7 +934,10 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                     {selectedVideo !== null ? (
                       <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto">
 
-                        <div className="relative aspect-video bg-[#0a0a0a] rounded-2xl overflow-hidden shadow-lg border border-gray-250">
+                        <div 
+                          key={selectedVideo?.id}
+                          className="relative aspect-video bg-[#0a0a0a] rounded-2xl overflow-hidden shadow-lg border border-gray-250"
+                        >
                           {videoLoadingError ? (
                             <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 space-y-4">
                               <AlertCircle className="w-12 h-12 opacity-30" />
@@ -830,7 +953,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                               <div id="youtube-player-element" className="w-full h-full" />
                             </div>
                           ) : (
-                            <video 
+                            <video
                               key={secureVideoUrl}
                               src={secureVideoUrl}
                               className="w-full h-full object-contain"
@@ -838,11 +961,64 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                               autoPlay
                               playsInline
                               controlsList="nodownload"
+                              disablePictureInPicture
+                              onEnded={() => setVideoFinished(true)}
                             >
                               Your browser does not support the video tag.
                             </video>
                           )}
                         </div>
+
+                        {/* Navigation Buttons Row */}
+                        {(() => {
+                          const videosList = module?.videos || [];
+                          const currentVideoIndex = videosList.findIndex((v: any) => v.id === selectedVideo?.id);
+                          const hasPrevVideo = currentVideoIndex > 0;
+                          const hasNextVideo = currentVideoIndex !== -1 && currentVideoIndex < videosList.length - 1;
+
+                          return (
+                            <div className="flex items-center justify-between gap-4 pt-1">
+                              {hasPrevVideo ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const prevVideo = videosList[currentVideoIndex - 1];
+                                    setSelectedVideo(prevVideo);
+                                    setVideoFinished(false);
+                                  }}
+                                  className="flex items-center gap-1.5 h-9 rounded-xl border-gray-250 text-gray-700 hover:text-gray-900 hover:bg-gray-50 font-semibold text-xs"
+                                >
+                                  <ChevronLeft className="w-4 h-4" />
+                                  <span>Previous Video</span>
+                                </Button>
+                              ) : (
+                                <div />
+                              )}
+
+                              {hasNextVideo && (
+                                <Button
+                                  variant={videoFinished ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => {
+                                    const nextVideo = videosList[currentVideoIndex + 1];
+                                    setSelectedVideo(nextVideo);
+                                    setVideoFinished(false);
+                                  }}
+                                  className={cn(
+                                    "flex items-center gap-1.5 h-9 rounded-xl font-semibold text-xs transition-all duration-300",
+                                    videoFinished
+                                      ? "bg-[#F26522] hover:bg-[#D54D10] border-[#F26522] text-white shadow-md shadow-orange-100"
+                                      : "border-gray-250 text-gray-700 hover:text-gray-900 hover:bg-gray-50"
+                                  )}
+                                >
+                                  <span>Next Video</span>
+                                  <ChevronRight className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         <div className="space-y-4 pt-2">
                           <div className="flex items-center justify-between gap-4">
@@ -853,8 +1029,8 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                               </Badge>
                               {isAdmin && (
                                 <div className="flex items-center gap-2">
-                                  <Button 
-                                    variant="outline" 
+                                  <Button
+                                    variant="outline"
                                     onClick={() => {
                                       const video = selectedVideo;
                                       setEditingVideo(video);
@@ -870,14 +1046,14 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                                     }}
                                     className="h-8 rounded-lg border-gray-200 text-gray-700 hover:bg-gray-50 font-bold text-xs uppercase px-3 flex items-center gap-1.5"
                                   >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                                     Edit Video
                                   </Button>
-                                  <Button 
-                                    variant="outline" 
+                                  <Button
+                                    variant="outline"
                                     onClick={() => {
-                                      handleDeleteItem('video', selectedVideo.id);
-                                      setSelectedVideo(null);
+                                      setDeleteTarget({ type: 'video', id: selectedVideo.id });
+                                      setDeleteConfirmOpen(true);
                                     }}
                                     className="h-8 rounded-lg border-red-200 text-red-600 hover:bg-red-50 font-bold text-xs uppercase px-3 flex items-center gap-1.5"
                                   >
@@ -906,7 +1082,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                             module.videos.map((video: any, vIdx: number) => {
                               const thumbnail = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60`;
                               return (
-                                <div 
+                                <div
                                   key={video.id}
                                   onClick={() => setSelectedVideo(video)}
                                   className="group cursor-pointer space-y-3"
@@ -925,7 +1101,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                                       {formatDuration(video.duration_seconds || 0)}
                                     </div>
                                   </div>
-                                  
+
                                   {/* Metadata */}
                                   <div className="flex gap-3 px-1 justify-between">
                                     <div className="flex gap-3 min-w-0">
@@ -962,12 +1138,13 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                                           className="p-1.5 text-gray-400 hover:text-[#F26522] hover:bg-orange-50 rounded-full transition-colors"
                                           title="Edit Video"
                                         >
-                                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                                         </button>
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            handleDeleteItem('video', video.id);
+                                            setDeleteTarget({ type: 'video', id: video.id });
+                                            setDeleteConfirmOpen(true);
                                           }}
                                           className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
                                           title="Delete Video"
@@ -1014,12 +1191,23 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                             </div>
                             <div className="flex items-center gap-2">
                               <a href={note.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "rounded-lg font-bold text-xs uppercase text-gray-500 hover:text-blue-600")}>View</a>
-                              <a href={note.file_url} download className={cn(buttonVariants({ variant: "outline", size: "icon" }), "w-10 h-10 rounded-lg border-gray-100")}><Download className="w-4 h-4" /></a>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleFileDownload(note.file_url, note.file_name || `Study_Material_${i + 1}.pdf`)}
+                                className="w-10 h-10 rounded-lg border-gray-100 bg-white"
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
                               {isAdmin && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  onClick={() => handleDeleteItem('notes', note.id)} 
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteTarget({ type: 'notes', id: note.id });
+                                    setDeleteConfirmOpen(true);
+                                  }}
                                   className="text-gray-400 hover:text-red-600 h-10 w-10 p-0 rounded-lg"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -1042,52 +1230,48 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                 {activeTab === 'task' && (
                   <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
                     <div className="flex items-center justify-between pb-6 border-b border-gray-100">
-                      <h3 className="text-lg font-bold text-[#111]">Deliverable Preview</h3>
-                      <Badge variant="outline" className="text-xs font-bold text-emerald-600 border-emerald-100 bg-emerald-50 px-3 py-1">Structure Check Only</Badge>
+                      <h3 className="text-lg font-bold text-[#111]">Deliverable Tasks</h3>
+                      <span className="text-xs font-bold text-gray-400 uppercase">{module.assignments?.length || 0} Tasks</span>
                     </div>
+                    <div className="grid grid-cols-1 gap-6">
                     {module.assignments?.length > 0 ? (
-                      module.assignments.map((task: any) => (
-                        <Card key={task.id} className="border border-gray-100 rounded-2xl p-8 bg-white relative overflow-hidden group shadow-sm">
-                          <div className="space-y-8">
-                            <div className="flex items-center justify-between gap-4">
-                              <div className="flex items-center gap-5">
-                                <div className="w-14 h-14 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                                  <Bookmark className="w-7 h-7" />
-                                </div>
-                                <div>
-                                  <h4 className="text-xl font-bold text-[#111]">{task.title}</h4>
-                                  <p className="text-xs font-bold text-gray-400 uppercase mt-1">Assignment Guidelines</p>
-                                </div>
-                              </div>
-                              {isAdmin && (
-                                <Button 
-                                  variant="outline" 
-                                  onClick={() => handleDeleteItem('assignment', task.id)} 
-                                  className="border-red-100 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl h-11 px-4 font-bold text-xs uppercase"
-                                >
-                                  <Trash2 className="w-4 h-4 mr-2" /> Delete Task
-                                </Button>
-                              )}
+                      module.assignments.map((task: any, i: number) => (
+                        <div key={task.id} className="group p-6 border border-gray-100 rounded-2xl hover:border-gray-300 hover:shadow-md transition-all bg-white flex items-center justify-between shadow-sm">
+                          <div className="flex items-center gap-5">
+                            <div className="w-14 h-14 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                              <Bookmark className="w-7 h-7" />
                             </div>
-                            <div className="p-6 bg-gray-50 rounded-xl border border-gray-100">
-                              <p className="text-sm text-gray-600 leading-relaxed">
-                                This assignment requires students to submit a project file. Admins can verify the source materials below.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <a href={task.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "ghost" }), "rounded-xl h-11 px-6 font-bold text-xs uppercase text-gray-500 hover:text-emerald-600 transition-colors flex items-center gap-2")}>
-                                <Eye className="w-4 h-4" /> View Instructions
-                              </a>
-                              <Button 
-                                variant="outline" 
-                                onClick={() => handleFileDownload(task.file_url, task.title + ".pdf")}
-                                className="border-gray-200 rounded-xl h-11 px-6 font-bold text-xs uppercase gap-2 flex items-center justify-center bg-white text-gray-700 hover:bg-gray-50"
-                              >
-                                <Download className="w-4 h-4" /> Download Resource Pack
-                              </Button>
+                            <div>
+                              <h4 className="text-base font-bold text-[#111]">{task.title}</h4>
+                              <p className="text-xs text-gray-400 font-bold uppercase mt-1">Assignment • Task {i + 1}</p>
                             </div>
                           </div>
-                        </Card>
+                          <div className="flex items-center gap-2">
+                            <a href={task.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "rounded-lg font-bold text-xs uppercase text-gray-500 hover:text-emerald-600")}>View</a>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handleFileDownload(task.file_url, task.title + ".pdf")}
+                              className="w-10 h-10 rounded-lg border-gray-100 bg-white"
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget({ type: 'assignment', id: task.id });
+                                  setDeleteConfirmOpen(true);
+                                }}
+                                className="text-gray-400 hover:text-red-600 h-10 w-10 p-0 rounded-lg"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       ))
                     ) : (
                       <div className="py-20 text-center space-y-4 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
@@ -1095,6 +1279,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                         <p className="text-xs font-bold text-gray-400 uppercase">No tasks defined</p>
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
 
@@ -1105,9 +1290,13 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
                       module.quizzes.map((quiz: any) => (
                         <div key={quiz.id} className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm relative overflow-hidden">
                           {isAdmin && (
-                            <Button 
-                              variant="ghost" 
-                              onClick={() => handleDeleteItem('quiz', quiz.id)} 
+                            <Button
+                              variant="ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget({ type: 'quiz', id: quiz.id });
+                                setDeleteConfirmOpen(true);
+                              }}
                               className="text-gray-400 hover:text-red-600 h-10 w-10 p-0 rounded-lg absolute top-4 right-4 z-10"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1135,14 +1324,76 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
             )}
           </Suspense>
         </div>
+
+        {/* BOTTOM MODULE NAVIGATION */}
+        {modules.length > 0 && (
+          (() => {
+            const currentModuleIndex = modules.findIndex(m => m.id === module?.id);
+            if (currentModuleIndex === -1) return null;
+            const prevMod = currentModuleIndex > 0 ? modules[currentModuleIndex - 1] : null;
+            const nextMod = currentModuleIndex < modules.length - 1 ? modules[currentModuleIndex + 1] : null;
+
+            return (
+              <div className="flex items-center justify-between pt-8 mt-12 border-t border-gray-200">
+                {prevMod ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => router.push(`/courses/${id}/modules/${prevMod.id}/preview`)}
+                    className="flex items-center gap-2 rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-[#6A6F73] hover:text-[#111] transition-all bg-white"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Previous Module
+                  </Button>
+                ) : (
+                  <div />
+                )}
+
+                {nextMod && (
+                  <Button
+                    onClick={() => router.push(`/courses/${id}/modules/${nextMod.id}/preview`)}
+                    className="flex items-center gap-2 rounded-xl h-11 px-5 font-bold text-xs uppercase transition-all bg-[#F26522] hover:bg-[#D54D10] text-white shadow-sm hover:shadow-md"
+                  >
+                    Next Module <ChevronRight className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            );
+          })()
+        )}
+
       </div>
+      <DeleteConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title={`Delete ${
+          deleteTarget?.type === 'assignment' 
+            ? 'Task' 
+            : deleteTarget?.type === 'notes' 
+            ? 'Document' 
+            : deleteTarget?.type === 'video'
+            ? 'Video'
+            : deleteTarget?.type === 'quiz'
+            ? 'Quiz'
+            : 'Resource'
+        }`}
+        description="Are you sure you want to delete this resource? This action cannot be undone."
+        trigger={null}
+        onConfirm={async () => {
+          if (deleteTarget) {
+            await handleDeleteItem(deleteTarget.type, deleteTarget.id);
+            if (deleteTarget.type === 'video' && selectedVideo?.id === deleteTarget.id) {
+              setSelectedVideo(null);
+            }
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }
 
 export default function ModulePreviewPage({ params }: { params: Promise<{ id: string, moduleId: string }> }) {
   const { id, moduleId } = use(params);
-  
+
   return (
     <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Loader2 className="w-10 h-10 animate-spin text-[#F26522]" /></div>}>
       <PreviewContent id={id} moduleId={moduleId} />

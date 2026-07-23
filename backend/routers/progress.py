@@ -69,6 +69,7 @@ async def update_video_progress(payload: VideoProgressUpdate, db: Session = Depe
             UserProgress.module_id == module_id
         ).first()
 
+        was_video_watched = False
         if not mod_prog:
             mod = db.query(Module).filter(Module.id == module_id).first()
             if mod:
@@ -80,6 +81,7 @@ async def update_video_progress(payload: VideoProgressUpdate, db: Session = Depe
                 )
                 db.add(mod_prog)
         else:
+            was_video_watched = bool(mod_prog.video_watched)
             mod_prog.video_watched = all_vids_done
         
         db.commit()
@@ -132,14 +134,15 @@ async def update_video_progress(payload: VideoProgressUpdate, db: Session = Depe
                         ))
                         db.commit()
 
-            # Log Activity for video completion
-            db.add(ActivityLog(
-                company_id=current_user.get("company_id"),
-                user_id=user_id,
-                action="Video Completed",
-                details=f"Watched all videos in module ID: {module_id}"
-            ))
-            db.commit()
+            # Log Activity for video completion if not logged before
+            if not was_video_watched:
+                db.add(ActivityLog(
+                    company_id=current_user.get("company_id"),
+                    user_id=user_id,
+                    action="Video Completed",
+                    details=f"Watched all videos in module ID: {module_id}"
+                ))
+                db.commit()
 
         return {"success": True, "completed": bool(existing.is_completed)}
 
@@ -164,6 +167,7 @@ async def update_notes_progress(payload: NotesProgressUpdate, db: Session = Depe
             UserProgress.module_id == module_id
         ).first()
 
+        was_notes_viewed = False
         if not existing:
             existing = UserProgress(
                 user_id=user_id,
@@ -173,6 +177,7 @@ async def update_notes_progress(payload: NotesProgressUpdate, db: Session = Depe
             )
             db.add(existing)
         else:
+            was_notes_viewed = bool(existing.notes_viewed)
             existing.notes_viewed = bool(payload.completed)
         
         db.commit()
@@ -224,14 +229,15 @@ async def update_notes_progress(payload: NotesProgressUpdate, db: Session = Depe
                         ))
                         db.commit()
 
-            # Log Activity for notes
-            db.add(ActivityLog(
-                company_id=current_user.get("company_id"),
-                user_id=user_id,
-                action="Notes Viewed",
-                details=f"Completed reading material for module ID: {module_id}"
-            ))
-            db.commit()
+            # Log Activity for notes if not logged before
+            if not was_notes_viewed:
+                db.add(ActivityLog(
+                    company_id=current_user.get("company_id"),
+                    user_id=user_id,
+                    action="Notes Viewed",
+                    details=f"Completed reading material for module ID: {module_id}"
+                ))
+                db.commit()
 
         return {"success": True, "completed": bool(existing.notes_viewed)}
     except Exception as e:
@@ -250,7 +256,7 @@ def get_module_progress_detail(course_id: int, module_id: int, db: Session = Dep
         if not module:
             raise HTTPException(status_code=404, detail="Module not found")
         
-        videos = db.query(Video).filter(Video.module_id == module_id).all()
+        videos = db.query(Video).filter(Video.module_id == module_id).order_by(Video.id.asc()).all()
         video_ids = [v.id for v in videos]
 
         # Get video progress

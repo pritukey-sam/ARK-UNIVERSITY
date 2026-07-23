@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -9,28 +9,58 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Mail, Lock, ArrowRight, Loader2, Award, BookOpen, Smile } from 'lucide-react';
+import { Mail, Lock, ArrowRight, ArrowLeft, Loader2, Award, BookOpen, Smile, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
+import { validateEmail } from '@/lib/validation';
+import { cn } from '@/lib/utils';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [emailError, setEmailError] = useState('');
   const { login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const expired = searchParams?.get('expired');
+
+  useEffect(() => {
+    if (expired) {
+      toast.error('Session expired. Please log in again.');
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [expired]);
+
+  const handleEmailChange = (val: string) => {
+    setEmail(val);
+    if (!val) {
+      setEmailError("Email address is required");
+    } else if (!validateEmail(val)) {
+      setEmailError("Invalid email address");
+    } else {
+      setEmailError("");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validateEmail(email)) {
+      setEmailError("Invalid email address");
+      return toast.error("Invalid email address");
+    }
+
     setLoading(true);
     try {
       const data = await api.auth.login({ email, password });
-      login(data.token, data.user);
+      login(data.user);
       toast.success('Login successful');
       
       if (data.user.role === 'super_admin') {
-        router.push('/super-admin');
+        router.replace('/super-admin');
       } else {
-        router.push('/dashboard');
+        router.replace('/dashboard');
       }
     } catch (error: any) {
       toast.error(error.message || 'Login failed');
@@ -41,6 +71,14 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#fff8f5] bg-gradient-to-br from-[#fffdfb] via-[#fff5f0] to-[#ffebd9] flex items-center justify-center p-4 lg:p-8 relative overflow-hidden font-sans">
+      {/* Back to Home Button */}
+      <Link
+        href="/"
+        className="absolute top-4 left-4 lg:top-6 lg:left-6 z-20 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-[#F26522] bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-gray-200/80 shadow-sm transition-all hover:shadow hover:bg-white"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        <span>Back to Home</span>
+      </Link>
       <style>{`
         @keyframes float {
           0%, 100% { transform: translateY(0px); }
@@ -90,13 +128,11 @@ export default function LoginPage() {
       <div className="w-full max-w-6xl min-h-[680px] lg:h-[760px] bg-white/40 backdrop-blur-md rounded-[32px] border border-white/60 shadow-2xl flex flex-col lg:flex-row overflow-hidden">
         
         {/* Left Side: 3D Workspace Scene */}
-        <div className="hidden lg:flex w-1/2 bg-[#fffcfb]/60 flex-col justify-between p-12 relative overflow-hidden border-r border-[#ffe5d9]/40">
+        <div className="hidden lg:flex w-1/2 bg-[#F0F2F8]/70 flex-col justify-between p-12 relative overflow-hidden border-r border-slate-200/40">
           {/* Top Logo */}
           <div className="flex items-center gap-3 z-10">
-            <div className="w-10 h-10 rounded-xl bg-[#F26522] flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <span className="text-white font-extrabold text-xl">L</span>
-            </div>
-            <span className="font-extrabold text-xl text-[#111] tracking-tight">Lumina <span className="text-[#F26522]">LMS</span></span>
+            <img src="/ark-simplify-logo.png" className="h-[40px] w-auto object-contain" alt="ARK Simplify Logo" />
+            <span className="font-extrabold text-xl text-[#111] tracking-tight">ARK University</span>
           </div>
 
           {/* Interactive Modern 3D Flat-Clay Illustration */}
@@ -272,8 +308,8 @@ export default function LoginPage() {
           </div>
 
           {/* Bottom Features Carousel-like Text */}
-          <div className="z-10 bg-white/60 backdrop-blur-md rounded-2xl p-6 border border-[#ffe5d9]/60 shadow-sm">
-            <div className="flex items-center gap-2 text-[#F26522] font-bold text-xs uppercase tracking-wider mb-2">
+          <div className="z-10 bg-white/60 backdrop-blur-md rounded-2xl p-6 border border-slate-200/50 shadow-sm">
+            <div className="flex items-center gap-2 text-[#2D3250] font-bold text-xs uppercase tracking-wider mb-2">
               <Award className="w-4 h-4 animate-bounce" /> Enterprise Learning Portal
             </div>
             <h3 className="font-extrabold text-[#111] text-lg mb-1">Empower Your Team's Growth</h3>
@@ -283,15 +319,13 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Right Side: Existing Lumina Login Form */}
+        {/* Right Side: Existing ARK University Login Form */}
         <div className="w-full lg:w-1/2 bg-white p-8 lg:p-16 flex flex-col justify-between relative shadow-[-12px_0_40px_rgba(242,101,34,0.03)]">
           {/* Top Logo (Mobile View Only) */}
           <div className="flex lg:hidden items-center justify-between mb-8">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-[#F26522] flex items-center justify-center shadow-md">
-                <span className="text-white font-extrabold text-sm">L</span>
-              </div>
-              <span className="font-extrabold text-base text-[#111]">Lumina <span className="text-[#F26522]">LMS</span></span>
+              <img src="/ark-simplify-logo.png" className="h-[32px] w-auto object-contain" alt="ARK Simplify Logo" />
+              <span className="font-extrabold text-base text-[#111]">ARK University</span>
             </div>
             <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Sign In</span>
           </div>
@@ -316,44 +350,58 @@ export default function LoginPage() {
                   <div className="space-y-2">
                     <Label htmlFor="email" className="text-xs font-bold uppercase tracking-wider text-gray-500">Email Address</Label>
                     <div className="relative group">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400 group-focus-within:text-[#F26522] transition-colors" />
+                      <Mail className={cn("absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400 group-focus-within:text-[#F26522] transition-colors", emailError && "text-red-500")} />
                       <Input
                         id="email"
                         type="email"
                         placeholder="name@company.com"
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => handleEmailChange(e.target.value)}
+                        onBlur={(e) => handleEmailChange(e.target.value)}
                         required
-                        className="pl-12 h-12 border-gray-200 focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] rounded-xl text-sm transition-all bg-gray-50/30 focus:bg-white"
+                        className={cn(
+                          "pl-12 h-12 border-gray-200 focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] rounded-xl text-sm transition-all bg-gray-50/30 focus:bg-white",
+                          emailError && "border-red-500 focus:border-red-500 focus:ring-red-500"
+                        )}
                       />
                     </div>
+                    {emailError && <p className="text-red-500 text-xs font-bold mt-1">{emailError}</p>}
                   </div>
 
                   {/* Password Input */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <Label htmlFor="password" className="text-xs font-bold uppercase tracking-wider text-gray-500">Password</Label>
-                      <Link href="#" className="text-xs font-semibold text-[#F26522] hover:underline hover:text-[#d54d10]">Forgot password?</Link>
+                      <Link href="/forgot-password" className="text-xs font-semibold text-[#F26522] hover:underline hover:text-[#d54d10]">Forgot password?</Link>
                     </div>
                     <div className="relative group">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400 group-focus-within:text-[#F26522] transition-colors" />
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400 group-focus-within:text-[#F26522] transition-colors z-10" />
                       <Input
                         id="password"
-                        type="password"
+                        type={showPassword ? "text" : "password"}
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        className="pl-12 h-12 border-gray-200 focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] rounded-xl text-sm transition-all bg-gray-50/30 focus:bg-white"
+                        className="pl-12 pr-12 h-12 border-gray-200 focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] rounded-xl text-sm transition-all bg-gray-50/30 focus:bg-white"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 z-10 text-gray-400 hover:text-[#F26522] transition-colors focus:outline-none"
+                        tabIndex={-1}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                      </button>
                     </div>
                   </div>
 
                   {/* Sign In Button */}
                   <Button 
                     type="submit" 
-                    className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white h-12 rounded-xl font-bold transition-all shadow-lg hover:shadow-xl shadow-orange-500/15 flex items-center justify-center gap-2 text-sm"
-                    disabled={loading}
+                    className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white h-12 rounded-xl font-bold transition-all shadow-lg hover:shadow-xl shadow-orange-500/15 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={loading || !!emailError}
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin mx-auto" />
@@ -368,7 +416,7 @@ export default function LoginPage() {
 
           {/* Footer Text */}
           <div className="mt-8 pt-6 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#6A6F73]">
-            <p>© 2026 Lumina LMS. All rights reserved.</p>
+            <p>© 2026 ARK University LMS. All rights reserved.</p>
             <div className="flex items-center gap-3 font-medium">
               <a href="#" className="hover:underline">Terms of Service</a>
               <span className="w-1 h-1 rounded-full bg-gray-300" />

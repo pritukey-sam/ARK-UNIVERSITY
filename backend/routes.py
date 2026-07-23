@@ -1,8 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Response, Request
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
-from database import get_db
-from auth import hash_password, verify_password, generate_token, get_current_user, require_roles
+from validation import (
+    validate_email,
+    validate_name,
+    validate_designation,
+    validate_course_name,
+    validate_description,
+    validate_url,
+    validate_numeric_range,
+    validate_and_log_upload,
+    validate_video_url
+)
+from database import get_db, log_audit_event
+from auth import hash_password, verify_password, generate_token, get_current_user, require_roles, validate_email_format
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case, text
 from models import User, Course, Module, Video, Notes, Assignment, Quiz, Question, QuizAttempt, Submission, Enrollment, UserProgress, UserAnswer, ActivityLog
@@ -17,10 +28,31 @@ import json
 
 router = APIRouter()
 
+from schemas import UserOut
+
+from services.email_service import send_html_email, get_onboarding_template, get_forgot_password_template
+import secrets
+from services.rate_limiter import login_rate_limiter
+from services.account_lockout import account_lockout_manager
+
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_prof_name(cls, v):
+        if v is not None:
+            validate_name(v)
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_prof_email(cls, v):
+        if v is not None:
+            validate_email(v)
+        return v
 
 class LoginRequest(BaseModel):
     email: str
@@ -35,19 +67,117 @@ class CreateUserRequest(BaseModel):
     designation: Optional[str] = None
     employee_id: Optional[str] = None
 
+    @field_validator('email')
+    @classmethod
+    def validate_u_email(cls, v):
+        validate_email(v)
+        return v
+
+    @field_validator('name')
+    @classmethod
+    def validate_u_name(cls, v):
+        validate_name(v)
+        return v
+
+    @field_validator('designation')
+    @classmethod
+    def validate_u_desig(cls, v):
+        if v is not None:
+            validate_designation(v)
+        return v
+
+    @field_validator('employee_id')
+    @classmethod
+    def validate_emp_id(cls, v):
+        if v is not None and v.strip() == "":
+            raise ValueError("Employee ID cannot be empty or whitespace-only")
+        return v
+
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
     designation: Optional[str] = None
     employee_id: Optional[str] = None
     is_active: Optional[bool] = None
 
+    @field_validator('email')
+    @classmethod
+    def validate_u_email(cls, v):
+        if v is not None:
+            validate_email(v)
+        return v
+
+    @field_validator('name')
+    @classmethod
+    def validate_u_name(cls, v):
+        if v is not None:
+            validate_name(v)
+        return v
+
+    @field_validator('designation')
+    @classmethod
+    def validate_u_desig(cls, v):
+        if v is not None:
+            validate_designation(v)
+        return v
+
+    @field_validator('employee_id')
+    @classmethod
+    def validate_emp_id(cls, v):
+        if v is not None and v.strip() == "":
+            raise ValueError("Employee ID cannot be empty or whitespace-only")
+        return v
+
+class FirstLoginResetRequest(BaseModel):
+    temporary_password: str
+    new_password: str
+    confirm_password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+    confirm_password: str
+
+class SMTPTestRequest(BaseModel):
+    to_email: str
+
 class CreateCourseRequest(BaseModel):
     title: str
     description: Optional[str] = None
     thumbnail_url: Optional[str] = None
     completion_duration_days: Optional[int] = 30
+
+    @field_validator('title')
+    @classmethod
+    def validate_course_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_course_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
+    @field_validator('thumbnail_url')
+    @classmethod
+    def validate_course_thumb(cls, v):
+        if v:
+            validate_url(v)
+        return v
+
+    @field_validator('completion_duration_days')
+    @classmethod
+    def validate_duration(cls, v):
+        if v is not None:
+            validate_numeric_range(v, 1, 365, 'Completion duration')
+        return v
 
 class CourseUpdate(BaseModel):
     title: Optional[str] = None
@@ -56,6 +186,34 @@ class CourseUpdate(BaseModel):
     curator_name: Optional[str] = None
     is_active: Optional[bool] = None
     completion_duration_days: Optional[int] = None
+
+    @field_validator('title')
+    @classmethod
+    def validate_course_title(cls, v):
+        if v is not None:
+            validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_course_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
+    @field_validator('thumbnail_url')
+    @classmethod
+    def validate_course_thumb(cls, v):
+        if v:
+            validate_url(v)
+        return v
+
+    @field_validator('completion_duration_days')
+    @classmethod
+    def validate_duration(cls, v):
+        if v is not None:
+            validate_numeric_range(v, 1, 365, 'Completion duration')
+        return v
 
 class AssignCourseRequest(BaseModel):
     course_id: int
@@ -66,11 +224,49 @@ class CreateModuleRequest(BaseModel):
     description: Optional[str] = None
     order: int = 0
 
+    @field_validator('title')
+    @classmethod
+    def validate_module_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_module_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
 class AddVideoRequest(BaseModel):
     title: str
     video_url: str
     duration_seconds: int = 0
     description: Optional[str] = None
+
+    @field_validator('title')
+    @classmethod
+    def validate_video_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('video_url')
+    @classmethod
+    def validate_vid_url(cls, v):
+        validate_video_url(v)
+        return v
+
+    @field_validator('duration_seconds')
+    @classmethod
+    def validate_dur(cls, v):
+        validate_numeric_range(v, 0, 86400, 'Duration')
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_vid_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
 
 class QuestionCreate(BaseModel):
     type: str = "mcq"
@@ -80,9 +276,27 @@ class QuestionCreate(BaseModel):
     marks: int = 1
     explanation: Optional[str] = None
 
+    @field_validator('question_text')
+    @classmethod
+    def validate_question_txt(cls, v):
+        validate_description(v, is_required=True)
+        return v
+
+    @field_validator('marks')
+    @classmethod
+    def validate_q_marks(cls, v):
+        validate_numeric_range(v, 1, 100, 'Marks')
+        return v
+
 class CreateQuizRequest(BaseModel):
     title: str
     questions: List[QuestionCreate]
+
+    @field_validator('title')
+    @classmethod
+    def validate_quiz_title(cls, v):
+        validate_course_name(v)
+        return v
 
 class QuizAnswer(BaseModel):
     question_id: int
@@ -95,11 +309,74 @@ class AttemptQuizRequest(BaseModel):
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 @router.post("/login")
-def login(body: LoginRequest, db: Session = Depends(get_db)):
+def login(body: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
     from models import Company
+    
+    # Extract client IP supporting X-Forwarded-For header and fallback
+    client_ip = request.headers.get("x-forwarded-for")
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+        
+    # Check rate limit status
+    is_email_limited = login_rate_limiter.is_email_blocked(body.email)
+    is_ip_limited = login_rate_limiter.is_ip_blocked(client_ip)
+    
+    if is_email_limited or is_ip_limited:
+        user = db.query(User).filter(User.email == body.email).first()
+        company_id = user.company_id if user else None
+        
+        if is_email_limited:
+            log_audit_event(db, "LOGIN_RATE_LIMIT_EMAIL", target=body.email, details=f"IP: {client_ip}", company_id=company_id)
+            print(f"[SECURITY-AUDIT] LOGIN_RATE_LIMIT_EMAIL | Email: {body.email} | IP: {client_ip}", flush=True)
+            
+        if is_ip_limited:
+            log_audit_event(db, "LOGIN_RATE_LIMIT_IP", target=body.email, details=f"IP: {client_ip}", company_id=company_id)
+            print(f"[SECURITY-AUDIT] LOGIN_RATE_LIMIT_IP | Email: {body.email} | IP: {client_ip}", flush=True)
+            
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again after 15 minutes."
+        )
+        
+    # Check account lock status (Layer 2)
+    if account_lockout_manager.is_locked(body.email, db):
+        raise HTTPException(
+            status_code=423,
+            detail="Your account has been temporarily locked due to multiple failed login attempts. Please try again after 30 minutes."
+        )
+        
     user = db.query(User).filter(User.email == body.email).first()
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user:
+        login_rate_limiter.add_failed_attempt(body.email, client_ip)
+        log_audit_event(db, "LOGIN_FAILED", target=body.email, details=f"IP: {client_ip}", company_id=None)
+        print(f"[SECURITY-AUDIT] LOGIN_FAILED | Email: {body.email} | IP: {client_ip}", flush=True)
+        
+        # Account lockout tracking
+        gets_locked = account_lockout_manager.add_failed_attempt(body.email)
+        if gets_locked:
+            log_audit_event(db, "ACCOUNT_LOCKED", target=body.email, details=f"IP: {client_ip}", company_id=None)
+            print(f"[SECURITY-AUDIT] ACCOUNT_LOCKED | Email: {body.email} | IP: {client_ip}", flush=True)
+            
+        raise HTTPException(status_code=401, detail="No account found with this email address.")
+        
+    if not verify_password(body.password, user.password_hash):
+        login_rate_limiter.add_failed_attempt(body.email, client_ip)
+        log_audit_event(db, "LOGIN_FAILED", target=body.email, details=f"IP: {client_ip}", company_id=user.company_id)
+        print(f"[SECURITY-AUDIT] LOGIN_FAILED | Email: {body.email} | IP: {client_ip}", flush=True)
+        
+        # Account lockout tracking
+        gets_locked = account_lockout_manager.add_failed_attempt(body.email)
+        if gets_locked:
+            log_audit_event(db, "ACCOUNT_LOCKED", target=body.email, details=f"IP: {client_ip}", company_id=user.company_id)
+            print(f"[SECURITY-AUDIT] ACCOUNT_LOCKED | Email: {body.email} | IP: {client_ip}", flush=True)
+            
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
+        
+    # Successful credentials check - reset rate limiting and lockout counters
+    login_rate_limiter.reset_email_attempts(body.email)
+    account_lockout_manager.reset_attempts(body.email)
     
     company = db.query(Company).filter(Company.id == user.company_id).first()
     if company:
@@ -114,30 +391,156 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
+    log_audit_event(db, "User Login", user.id, user.name, f"User '{user.name}' logged in successfully", user.company_id)
 
     token = generate_token(user.id, user.email, user.role, user.company_id)
+
+    # Set JWT as HttpOnly cookie — inaccessible to JavaScript (XSS-proof)
+    response.set_cookie(
+        key="token",
+        value=token,
+        httponly=True,
+        secure=False,       # Set True in production (HTTPS)
+        samesite="lax",
+        path="/",
+        max_age=86400       # 24 hours — matches JWT expiry
+    )
+
+    # Return user data only — token is NOT exposed in the response body
     return {
-        "token": token, 
         "user": {
-            "id": user.id, 
-            "email": user.email, 
-            "name": user.name, 
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
             "role": user.role,
             "company_id": user.company_id,
             "company_name": company_name,
             "employee_id": user.employee_id,
             "plan_type": plan_type,
             "plan_price": plan_price,
-            "payment_status": company.payment_status if company else "completed"
+            "payment_status": company.payment_status if company else "completed",
+            "is_first_login": getattr(user, 'is_first_login', False),
+            "avatar_url": user.avatar_url
         }
     }
+
+@router.post("/logout")
+def logout(response: Response):
+    """Clear the HttpOnly session cookie to log the user out server-side."""
+    response.delete_cookie(key="token", path="/")
+    return {"message": "Logged out successfully"}
+@router.post("/auth/first-login-reset")
+def first_login_reset(body: FirstLoginResetRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    user = db.query(User).filter(User.id == current_user["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # 1. verify current password (which is the temporary one)
+    if not verify_password(body.temporary_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Invalid temporary password entered")
+        
+    # 2. verify new passwords match
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirm password do not match")
+        
+    # 3. enforce secure password validation
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    if not any(c.isalpha() for c in body.new_password) or not any(c.isdigit() for c in body.new_password):
+        raise HTTPException(status_code=400, detail="New password must contain both letters and numbers")
+        
+    # 4. Save securely
+    user.password_hash = hash_password(body.new_password)
+    user.is_first_login = False
+    user.temp_password = None
+    
+    db.commit()
+    return {"message": "Password changed successfully. Please log in with your new password."}
+
+@router.post("/auth/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email.strip().lower()).first()
+    
+    # Security: Always return a generic success message to prevent email enumeration
+    success_msg = {"message": "If this email exists in our system, a password reset link has been sent."}
+    
+    if not user:
+        return success_msg
+        
+    # Generate secure reset token
+    token = secrets.token_urlsafe(32)
+    user.reset_token = token
+    # Expires in 1 hour
+    user.reset_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    
+    db.commit()
+    
+    # Send email
+    reset_link = f"http://localhost:3000/reset-password?token={token}"
+    send_html_email(
+        to_email=user.email,
+        subject="Reset Your ARK University LMS Password",
+        html_content=get_forgot_password_template(user.name, reset_link),
+        text_content=f"Hello, {user.name}.\n\nYou requested a password reset. Please use the following link to reset your password: {reset_link}\n\nThis link will expire in 1 hour."
+    )
+    
+    return success_msg
+
+@router.post("/auth/reset-password")
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    # 1. find user by token
+    user = db.query(User).filter(User.reset_token == body.token).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired password reset token")
+        
+    # 2. verify token is not expired
+    now = datetime.now(timezone.utc)
+    expires_at = user.reset_token_expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        
+    if expires_at < now:
+        user.reset_token = None
+        user.reset_token_expires_at = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Password reset token has expired")
+        
+    # 3. verify new passwords match
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirm password do not match")
+        
+    # 4. enforce secure password validation
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    if not any(c.isalpha() for c in body.new_password) or not any(c.isdigit() for c in body.new_password):
+        raise HTTPException(status_code=400, detail="New password must contain both letters and numbers")
+        
+    # 5. Save securely and clear token
+    user.password_hash = hash_password(body.new_password)
+    user.reset_token = None
+    user.reset_token_expires_at = None
+    
+    # If they are resetting password via forgot password, let's also mark first login as False just in case
+    user.is_first_login = False
+    user.temp_password = None
+    
+    db.commit()
+    return {"message": "Password reset successfully. Please log in with your new password."}
+
+@router.post("/auth/smtp-test")
+def smtp_test(body: SMTPTestRequest):
+    from services.email_service import run_smtp_diagnostics
+    print(f"[SMTP-TEST-ROUTE] Triggering developer SMTP test to {body.to_email}", flush=True)
+    telemetry = run_smtp_diagnostics(body.to_email)
+    print(f"[SMTP-TEST-ROUTE] Telemetry completed. Success={telemetry['success']}", flush=True)
+    return telemetry
 
 
 from services.id_service import generate_user_id
 from dependencies import get_current_company_id
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
-@router.post("/create-user")
+@router.post("/create-user", response_model=UserOut)
 def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr", "super_admin"]))):
     try:
         company_id = current_user.get("company_id")
@@ -150,35 +553,109 @@ def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_
         if current_user["role"] == "admin" and body.role == "super_admin":
             raise HTTPException(status_code=403, detail="Admin cannot create super_admin accounts.")
         
+        # Email format validation
+        if not validate_email_format(body.email):
+            raise HTTPException(status_code=400, detail="Invalid email address format")
+            
         # Duplicate email check
-        existing = db.query(User).filter(User.email == body.email).first()
+        existing = db.query(User).filter(User.email == body.email.strip().lower()).first()
         if existing:
             if not existing.is_active:
-                # If user exists but is inactive, we could reactivate them or just throw error.
-                # Reactivating is better for UX if they want to 're-add' the same person.
-                # But for now, let's just throw error to keep it simple as requested.
-                raise HTTPException(status_code=400, detail="A deactivated user with this email already exists. Please contact support to reactivate.")
+                print(f"[REACTIVATION-LOG] Reactivating deactivated user: id={existing.id}, email={existing.email}", flush=True)
+                
+                # Regenerate password and initials
+                first_name = body.name.split()[0] if body.name.strip() else "User"
+                generated_password = first_name.capitalize() + "123"
+                initials = "".join([n[0].upper() for n in body.name.split()[:2]])
+                
+                # Update attributes
+                existing.name = body.name
+                existing.role = body.role
+                existing.avatar_initials = initials
+                
+                # Check duplicate employee_id on reactivation
+                new_emp_id = body.employee_id.strip() if body.employee_id and body.employee_id.strip() else None
+                if new_emp_id:
+                    existing_emp = db.query(User).filter(
+                        User.employee_id == new_emp_id,
+                        User.company_id == company_id,
+                        User.is_active == True,
+                        User.id != existing.id
+                    ).first()
+                    if existing_emp:
+                        raise HTTPException(status_code=400, detail="User with this Employee ID already exists.")
+                    existing.employee_id = new_emp_id
+                elif not existing.employee_id:
+                    existing.employee_id = generate_user_id(db, company_id, body.role)
+
+                existing.department = body.department or "Engineering"
+                existing.designation = body.designation
+                existing.password_hash = hash_password(generated_password)
+                existing.temp_password = None
+                existing.is_first_login = True
+                existing.is_active = True
+                
+                # Log Activity
+                db.add(ActivityLog(
+                    company_id=company_id,
+                    user_id=current_user["id"],
+                    action="User Reactivated",
+                    details=f"Reactivated deactivated {body.role}: {body.name} ({body.email})"
+                ))
+                
+                db.commit()
+                log_audit_event(db, "User Created", current_user["id"], body.name, f"Reactivated deactivated {body.role}: {body.name} ({body.email})", company_id)
+                db.refresh(existing)
+                
+                # Trigger Onboarding Email
+                try:
+                    print(f"[SMTP-LOG] Initiating onboarding email dispatch inside reactivate_user", flush=True)
+                    send_html_email(
+                        to_email=existing.email,
+                        subject="Welcome Back to ARK University LMS",
+                        html_content=get_onboarding_template(existing.name, existing.role, existing.email, generated_password),
+                        text_content=f"Welcome Back to ARK University LMS!\n\nEmail: {existing.email}\nTemporary Password: {generated_password}\n\nPlease change your password on first login."
+                    )
+                    print(f"[SMTP-LOG] Onboarding email dispatch finished.", flush=True)
+                except Exception as mail_err:
+                    import traceback
+                    print(f"[SMTP-LOG] Onboarding email dispatch CRITICAL FAILURE: {str(mail_err)}", flush=True)
+                    traceback.print_exc()
+                
+                return existing
             raise HTTPException(status_code=400, detail="User with this email already exists.")
 
         initials = "".join([n[0].upper() for n in body.name.split()[:2]])
         
-        # Generate ID
-        emp_id = generate_user_id(db, company_id, body.role)
+        # Check duplicate employee_id for new user creation
+        emp_id = body.employee_id.strip() if body.employee_id and body.employee_id.strip() else None
+        if emp_id:
+            existing_emp = db.query(User).filter(
+                User.employee_id == emp_id,
+                User.company_id == company_id,
+                User.is_active == True
+            ).first()
+            if existing_emp:
+                raise HTTPException(status_code=400, detail="User with this Employee ID already exists.")
+        else:
+            emp_id = generate_user_id(db, company_id, body.role)
         
         # Password auto-generation: First name (capitalized) + 123
         first_name = body.name.split()[0] if body.name.strip() else "User"
         generated_password = first_name.capitalize() + "123"
         
         user = User(
-            email=body.email,
+            email=body.email.strip().lower(),
             password_hash=hash_password(generated_password),
             name=body.name,
             role=body.role,
             avatar_initials=initials,
             company_id=company_id,
-            employee_id=body.employee_id or emp_id,
+            employee_id=emp_id,
             department=body.department or "Engineering",
-            designation=body.designation
+            designation=body.designation,
+            is_first_login=True,
+            temp_password=None
         )
         db.add(user)
         
@@ -191,7 +668,24 @@ def create_user(body: CreateUserRequest, db: Session = Depends(get_db), current_
         ))
         
         db.commit()
+        log_audit_event(db, "User Created", current_user["id"], body.name, f"Added new {body.role}: {body.name} ({body.email})", company_id)
         db.refresh(user)
+
+        # Trigger Onboarding Email
+        try:
+            print(f"[SMTP-LOG] Initiating onboarding email dispatch inside create_user", flush=True)
+            send_html_email(
+                to_email=user.email,
+                subject="Welcome to ARK University LMS",
+                html_content=get_onboarding_template(user.name, user.role, user.email, generated_password),
+                text_content=f"Welcome to ARK University LMS!\n\nEmail: {user.email}\nTemporary Password: {generated_password}\n\nPlease change your password on first login."
+            )
+            print(f"[SMTP-LOG] Onboarding email dispatch finished.", flush=True)
+        except Exception as mail_err:
+            import traceback
+            print(f"[SMTP-LOG] Onboarding email dispatch CRITICAL FAILURE: {str(mail_err)}", flush=True)
+            traceback.print_exc()
+            
         return user
     except Exception as e:
         db.rollback()
@@ -219,6 +713,7 @@ def create_course(body: CreateCourseRequest, db: Session = Depends(get_db), curr
     ))
     
     db.commit()
+    log_audit_event(db, "Course Created", current_user["id"], course.title, f"Created new course: '{course.title}'", current_user.get("company_id"))
     db.refresh(course)
     return course
 
@@ -246,6 +741,7 @@ def update_course(course_id: int, body: CourseUpdate, db: Session = Depends(get_
     ))
     
     db.commit()
+    log_audit_event(db, "Settings Changed", current_user["id"], course.title, f"Updated course settings for: '{course.title}'", company_id)
     db.refresh(course)
     return course
 
@@ -267,9 +763,16 @@ def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(
     if current_user["role"] == "admin":
         query = query.filter(User.role != "super_admin")
     elif current_user["role"] == "hr":
-        query = query.filter(User.role == "employee")
+        # Allow HR to fetch all company users (employee, hr, admin, super_admin) so stats are calculated correctly.
+        # The frontend will filter which users are listed in the table.
+        pass
     
     users = query.all()
+    
+    # Debug logging to verify role values from DB
+    print(f"DEBUG: get_users called by {current_user['role']} (company_id={company_id})")
+    for u in users:
+        print(f"  -> USER: id={u.id}, name='{u.name}', email='{u.email}', role='{u.role}'")
     results = []
     for u in users:
         # Get all enrollments for this user
@@ -311,6 +814,7 @@ def get_users(db: Session = Depends(get_db), current_user=Depends(require_roles(
             "employee_id": u.employee_id,
             "created_at": u.created_at,
             "avatar_initials": u.avatar_initials,
+            "avatar_url": u.avatar_url,
             "assigned_courses": assigned_courses,
             "latest_course": latest_enrollment.course.title if latest_enrollment and latest_enrollment.course else "Not Assigned",
             "assigned_at": latest_enrollment.enrolled_at if latest_enrollment else None
@@ -347,6 +851,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user=Depend
     )
     db.add(log)
     db.commit()
+    log_audit_event(db, "User Deleted", current_user["id"], user.name, f"Deactivated user: {user.name} ({user.email})", company_id)
     
     return {"message": "User deactivated successfully"}
 
@@ -360,6 +865,24 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), c
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
+    email_changed = False
+    generated_password = None
+    if body.email and body.email.strip().lower() != user.email.lower():
+        if not validate_email_format(body.email):
+            raise HTTPException(status_code=400, detail="Invalid email address format")
+        existing = db.query(User).filter(User.email == body.email.strip().lower(), User.id != user.id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already in use")
+        
+        user.email = body.email.strip().lower()
+        if user.role in ["hr", "employee"]:
+            email_changed = True
+            first_name = user.name.split()[0] if user.name.strip() else "User"
+            generated_password = first_name.capitalize() + "123"
+            user.password_hash = hash_password(generated_password)
+            user.temp_password = None
+            user.is_first_login = True
+
     if body.name: user.name = body.name
     if body.role: user.role = body.role
     if body.department: user.department = body.department
@@ -376,6 +899,23 @@ def update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db), c
     ))
     
     db.commit()
+    log_audit_event(db, "Settings Changed", current_user["id"], user.name, f"Updated profile settings for user: {user.name} ({user.email})", company_id)
+    
+    if email_changed and generated_password:
+        try:
+            print(f"[SMTP-LOG] Initiating updated credentials email dispatch inside update_user", flush=True)
+            send_html_email(
+                to_email=user.email,
+                subject="Welcome to ARK University LMS - Updated Credentials",
+                html_content=get_onboarding_template(user.name, user.role, user.email, generated_password),
+                text_content=f"Welcome to ARK University LMS!\n\nYour login email has been updated to: {user.email}\nTemporary Password: {generated_password}\n\nPlease change your password on first login."
+            )
+            print(f"[SMTP-LOG] Email dispatch finished.", flush=True)
+        except Exception as mail_err:
+            import traceback
+            print(f"[SMTP-LOG] Email dispatch CRITICAL FAILURE: {str(mail_err)}", flush=True)
+            traceback.print_exc()
+
     return {"message": "User updated successfully"}
 
 @router.get("/users/{user_id}")
@@ -486,6 +1026,7 @@ def get_user_details(user_id: int, db: Session = Depends(get_db), current_user=D
             "department": user.department or "Engineering",
             "designation": user.designation,
             "avatar_initials": user.avatar_initials,
+            "avatar_url": user.avatar_url,
             "created_at": user.created_at,
             "last_login_at": user.last_login_at,
             "is_active": user.is_active,
@@ -539,11 +1080,37 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
     ).first()
     
     if existing:
-        # Re-assigning updates the due date (extensions) and ensures it is active
+        was_inactive = not existing.is_active
         existing.is_active = True
         new_due = datetime.now(timezone.utc) + timedelta(days=course.completion_duration_days)
         existing.due_date = new_due
         
+        # Mark related course access request as fulfilled
+        from models import CourseAccessRequest
+        access_req = db.query(CourseAccessRequest).filter(
+            CourseAccessRequest.user_id == body.employee_id,
+            CourseAccessRequest.course_id == body.course_id,
+            CourseAccessRequest.status.in_(["pending", "approved"])
+        ).first()
+        if access_req:
+            access_req.status = "fulfilled"
+            access_req.reviewed_by = current_user["id"]
+            access_req.reviewed_at = datetime.now(timezone.utc)
+            access_req.updated_at = datetime.now(timezone.utc)
+
+        # Notify if newly reactivated
+        if was_inactive:
+            from models import Notification
+            notif = Notification(
+                user_id=body.employee_id,
+                title="Course Assigned",
+                message=f"You have been assigned the course {course.title}.",
+                type="course_assigned",
+                route="/courses",
+                is_read=False
+            )
+            db.add(notif)
+
         # Log Extension
         db.add(ActivityLog(
             company_id=company_id,
@@ -577,6 +1144,7 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
             db.add(req)
         
         db.commit()
+        log_audit_event(db, "Course Assigned", current_user["id"], user.name, f"Extended deadline for '{course.title}' (User: {user.name})", company_id)
         return {"message": f"Deadline for '{course.title}' extended to {existing.due_date.strftime('%d %b %Y')}"}
 
     due_date = datetime.now(timezone.utc) + timedelta(days=course.completion_duration_days)
@@ -586,6 +1154,31 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
         due_date=due_date
     )
     db.add(enrollment)
+    
+    # Mark related course access request as fulfilled
+    from models import CourseAccessRequest
+    access_req = db.query(CourseAccessRequest).filter(
+        CourseAccessRequest.user_id == body.employee_id,
+        CourseAccessRequest.course_id == body.course_id,
+        CourseAccessRequest.status.in_(["pending", "approved"])
+    ).first()
+    if access_req:
+        access_req.status = "fulfilled"
+        access_req.reviewed_by = current_user["id"]
+        access_req.reviewed_at = datetime.now(timezone.utc)
+        access_req.updated_at = datetime.now(timezone.utc)
+
+    # Notify employee of course assignment
+    from models import Notification
+    notif = Notification(
+        user_id=body.employee_id,
+        title="Course Assigned",
+        message=f"You have been assigned the course {course.title}.",
+        type="course_assigned",
+        route="/courses",
+        is_read=False
+    )
+    db.add(notif)
     
     # Also create the approved AssignmentRequest so it appears in the listing/history
     from models import AssignmentRequest
@@ -621,6 +1214,7 @@ def assign_course(body: AssignCourseRequest, db: Session = Depends(get_db), curr
     db.add(log)
     
     db.commit()
+    log_audit_event(db, "Course Assigned", current_user["id"], user.name, f"Assigned course '{course.title}' to {user.name}", company_id)
     
     return {"message": f"Course '{course.title}' assigned to {user.name} successfully"}
 
@@ -675,7 +1269,7 @@ def global_search(q: str = Query(..., min_length=1), db: Session = Depends(get_d
     return {
         "courses": [{"id": c.id, "title": c.title, "type": "course"} for c in courses],
         "modules": [{"id": m.id, "title": m.title, "course_id": m.course_id, "type": "module"} for m in modules],
-        "users": [{"id": u.id, "name": u.name, "role": u.role, "email": u.email, "employee_id": u.employee_id, "type": "user"} for u in users]
+        "users": [{"id": u.id, "name": u.name, "role": u.role, "email": u.email, "employee_id": u.employee_id, "avatar_url": u.avatar_url, "type": "user"} for u in users]
     }
 
 # ── HR ─────────────────────────────────────────────────────────────────────────
@@ -687,7 +1281,7 @@ def get_employee_progress(db: Session = Depends(get_db), current_user=Depends(re
         Enrollment, User, Course
     ).join(User, Enrollment.user_id == User.id
     ).join(Course, Enrollment.course_id == Course.id
-    )
+    ).order_by(Enrollment.enrolled_at.desc())
     
     if company_id:
         query = query.filter(User.company_id == company_id)
@@ -815,6 +1409,11 @@ def complete_course(course_id: int, db: Session = Depends(get_db), current_user=
         enrollment.is_completed = True
         enrollment.completed_at = datetime.now(timezone.utc)
         db.commit()
+        course = db.query(Course).filter(Course.id == course_id).first()
+        course_title = course.title if course else f"Course {course_id}"
+        actor = db.query(User).filter(User.id == current_user["id"]).first()
+        actor_name = actor.name if actor else "Employee"
+        log_audit_event(db, "Course Completed", current_user["id"], course_title, f"Employee '{actor_name}' completed the course '{course_title}'", current_user.get("company_id"))
     
     return {"message": "Course marked as completed!"}
 
@@ -947,11 +1546,25 @@ def get_activity_feed(db: Session = Depends(get_db), current_user=Depends(get_cu
         company_id = current_user.get("company_id")
         
         # Pull directly from ActivityLog for the most accurate and inclusive feed
-        query = db.query(ActivityLog).options(joinedload(ActivityLog.user))
+        user_role = current_user.get("role", "").lower()
+        user_id = current_user.get("id")
+        
+        query = db.query(ActivityLog).outerjoin(User).options(joinedload(ActivityLog.user))
         if company_id:
             query = query.filter(ActivityLog.company_id == company_id)
             
-        logs = query.order_by(ActivityLog.created_at.desc()).limit(15).all()
+        # Role-based activity visibility filtering
+        if user_role == "hr":
+            # HR ONLY sees: own actions OR actions performed by employees
+            query = query.filter(
+                (ActivityLog.user_id == user_id) | 
+                (User.role == "employee")
+            )
+        elif user_role == "employee":
+            # Employees ONLY see their own actions
+            query = query.filter(ActivityLog.user_id == user_id)
+            
+        logs = query.order_by(ActivityLog.created_at.desc()).limit(100).all()
         
         icon_map = {
             "User Created": "user",
@@ -970,14 +1583,25 @@ def get_activity_feed(db: Session = Depends(get_db), current_user=Depends(get_cu
         }
         
         activities = []
+        seen = set()
         for l in logs:
             name = l.user.name if l.user else "System"
+            msg = f"{name}: {l.details}" if l.details else f"{name} performed {l.action}"
+            
+            # Deduplicate same actions by the same user with same details
+            key = (l.user_id or 0, l.action, l.details)
+            if key in seen:
+                continue
+            seen.add(key)
+            
             activities.append({
                 "type": l.action.lower().replace(" ", "_"),
-                "message": f"{name}: {l.details}" if l.details else f"{name} performed {l.action}",
+                "message": msg,
                 "time": l.created_at,
                 "icon": icon_map.get(l.action, "activity")
             })
+            if len(activities) >= 15:
+                break
             
         # Fallback to old logic only if no logs exist (legacy support)
         if not activities:
@@ -1047,7 +1671,7 @@ def get_modules(course_id: int, db: Session = Depends(get_db), current_user=Depe
             results.append({
                 "id": m.id, "course_id": m.course_id, "title": m.title,
                 "description": m.description, "order": m.order,
-                "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "description": v.description, "duration_seconds": v.duration_seconds} for v in m.videos],
+                "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "description": v.description, "duration_seconds": v.duration_seconds} for v in sorted(m.videos, key=lambda x: x.id)],
                 "notes": [{"id": n.id, "file_url": n.file_url, "file_type": n.file_type} for n in m.notes],
                 "assignments": [{"id": a.id, "title": a.title, "file_url": a.file_url} for a in m.assignments],
                 "quizzes": [{"id": q.id, "title": q.title} for q in m.quizzes]
@@ -1079,7 +1703,7 @@ def get_module(module_id: int, db: Session = Depends(get_db), current_user=Depen
             "id": module.id, "course_id": module.course_id, "title": module.title,
             "description": module.description, "order": module.order,
             "duration_seconds": total_seconds,
-            "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "duration_seconds": v.duration_seconds, "description": v.description} for v in module.videos],
+            "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "duration_seconds": v.duration_seconds, "description": v.description} for v in sorted(module.videos, key=lambda x: x.id)],
             "notes": [{"id": n.id, "file_url": n.file_url, "file_type": n.file_type} for n in module.notes],
             "assignments": [{"id": a.id, "title": a.title, "file_url": a.file_url} for a in module.assignments],
             "quizzes": [{"id": q.id, "title": q.title, "question_count": len(q.questions)} for q in module.quizzes]
@@ -1100,6 +1724,11 @@ def delete_module(module_id: int, db: Session = Depends(get_db), current_user=De
 
 @router.post("/modules/{module_id}/videos")
 def add_video(module_id: int, body: AddVideoRequest, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+    try:
+        validate_video_url(body.video_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     new_video = Video(
         module_id=module_id, 
         title=body.title, 
@@ -1120,7 +1749,9 @@ def add_video(module_id: int, body: AddVideoRequest, db: Session = Depends(get_d
     }
 
 @router.post("/modules/{module_id}/notes")
-async def add_notes(module_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+async def add_notes(module_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+    validate_and_log_upload(file, "document", db, request, current_user, "notes")
+
     # Local File Upload
     file_url = save_file_locally(file, folder="notes")
     if not file_url:
@@ -1134,7 +1765,9 @@ async def add_notes(module_id: int, file: UploadFile = File(...), db: Session = 
     return new_notes
 
 @router.post("/modules/{module_id}/assignments")
-async def add_assignment(module_id: int, title: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+async def add_assignment(module_id: int, request: Request, title: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin"]))):
+    validate_and_log_upload(file, "document", db, request, current_user, "assignments")
+
     # Local File Upload
     file_url = save_file_locally(file, folder="assignments")
     if not file_url:
@@ -1166,7 +1799,12 @@ def update_video(video_id: int, body: UpdateVideoRequest, db: Session = Depends(
     if not video: raise HTTPException(status_code=404, detail="Video not found")
     if body.title is not None: video.title = body.title
     if body.duration_seconds is not None: video.duration_seconds = body.duration_seconds
-    if body.video_url is not None: video.video_url = body.video_url
+    if body.video_url is not None:
+        try:
+            validate_video_url(body.video_url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        video.video_url = body.video_url
     if body.description is not None: video.description = body.description
     db.commit()
     db.refresh(video)
@@ -1215,17 +1853,19 @@ def create_quiz(module_id: int, body: CreateQuizRequest, db: Session = Depends(g
 @router.post("/modules/{module_id}/quizzes/bulk-preview")
 async def bulk_preview_quiz(
     module_id: int, 
+    request: Request,
     file: UploadFile = File(...), 
     db: Session = Depends(get_db), 
     current_user=Depends(require_roles(["admin"]))
 ):
+    validate_and_log_upload(file, "document", db, request, current_user, "quizzes")
     try:
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read Excel file: {str(e)}")
 
-    required_cols = ['question', 'type', 'correct_answer']
+    required_cols = ['question', 'option1', 'option2', 'option3', 'option4', 'correct_answer']
     for col in required_cols:
         if col not in df.columns:
             raise HTTPException(status_code=400, detail=f"Missing required column: {col}")
@@ -1236,17 +1876,30 @@ async def bulk_preview_quiz(
     seen_in_file = set()
 
     preview_data = []
-    import json
-
+    
     for index, row in df.iterrows():
         try:
-            if pd.isna(row['question']): continue
+            # 1. Skip completely empty rows
+            if pd.isna(row.get('question')) and pd.isna(row.get('option1')) and pd.isna(row.get('option2')) and pd.isna(row.get('option3')) and pd.isna(row.get('option4')) and pd.isna(row.get('correct_answer')):
+                continue
 
-            q_text = str(row['question']).strip()
-            q_type = str(row['type']).strip().lower()
+            q_text = row.get('question')
+            if pd.isna(q_text) or not str(q_text).strip():
+                preview_data.append({
+                    "question_text": "Missing Question",
+                    "type": "mcq",
+                    "options_list": [],
+                    "correct_answer": "",
+                    "marks": 1,
+                    "explanation": None,
+                    "error": "Question text is required"
+                })
+                continue
+
+            q_text = str(q_text).strip()
             error = None
 
-            # Check for duplicates (existing in DB or already seen in this file)
+            # Check duplicates
             q_text_lower = q_text.lower()
             if q_text_lower in existing_texts:
                 error = "Duplicate question skipped (already exists in this module)"
@@ -1254,75 +1907,74 @@ async def bulk_preview_quiz(
                 error = "Duplicate question skipped (appears multiple times in this file)"
             
             seen_in_file.add(q_text_lower)
-            
-            if q_type not in ['mcq', 'fill', 'short'] and not error:
-                error = f"Invalid type '{q_type}'"
 
+            # Retrieve and validate all 4 options
             options = []
-            if q_type == 'mcq':
-                for i in range(1, 6): # Support up to 5 options
-                    col_name = f'option{i}'
-                    if col_name in row and not pd.isna(row[col_name]):
-                        options.append(str(row[col_name]).strip())
-                
-                if len(options) < 2 and not error:
-                    error = "MCQ must have at least 2 options"
-                elif len(options) > 5 and not error:
-                    error = "MCQ can have maximum 5 options"
+            for i in range(1, 5):
+                val = row.get(f'option{i}')
+                if pd.isna(val) or not str(val).strip():
+                    if not error:
+                        error = f"Option {i} is required and cannot be empty"
+                else:
+                    options.append(str(val).strip())
 
-            # Correct Answer Parsing & Validation
-            correct = row['correct_answer']
-            if pd.notna(correct):
-                # Convert float/int to clean string (e.g., 1.0 -> "1")
+            # Check duplicate options
+            if len(options) == 4:
+                unique_opts = {opt.lower() for opt in options}
+                if len(unique_opts) < 4 and not error:
+                    error = "Duplicate options are not allowed within the same question"
+
+            # Validate correct answer
+            correct = row.get('correct_answer')
+            if pd.isna(correct) or not str(correct).strip():
+                if not error:
+                    error = "correct_answer is required"
+                correct = ""
+            else:
+                # Clean up correct answer representation
                 if isinstance(correct, (int, float)):
                     correct = str(int(correct))
                 else:
                     correct = str(correct).strip()
-            else:
-                correct = ""
 
-            if not correct and not error:
-                error = "Correct answer is required"
-            
-            if q_type == 'mcq' and not error:
-                if not correct.isdigit():
-                    error = "MCQ correct_answer must be a number (1-5)"
+            # Ensure correct answer matches one of the 4 options or is an index 1..4
+            correct_resolved = ""
+            if not error:
+                # 1. Check if it matches index (1-4)
+                if correct in ["1", "2", "3", "4"]:
+                    idx = int(correct) - 1
+                    correct_resolved = options[idx]
                 else:
-                    idx = int(correct)
-                    if idx < 1 or idx > len(options):
-                        error = f"MCQ correct_answer must be between 1 and {len(options)}"
-
-            marks = 1
-            if 'marks' in row and not pd.isna(row['marks']):
-                try: marks = int(row['marks'])
-                except: pass
-
-            # Explanation
-            explanation = str(row['explanation']).strip() if 'explanation' in row and not pd.isna(row['explanation']) else None
-
-            # Resolve index to actual text for MCQs if it's a number
-            if q_type == 'mcq' and not error:
-                if correct.isdigit():
-                    idx = int(correct) - 1 # Convert 1-based Excel to 0-based Array
-                    if 0 <= idx < len(options):
-                        correct = options[idx]
+                    # 2. Check if it matches one of the option texts exactly
+                    matched_idx = -1
+                    for idx, opt in enumerate(options):
+                        if opt.lower() == correct.lower():
+                            matched_idx = idx
+                            break
+                    if matched_idx != -1:
+                        correct_resolved = options[matched_idx]
                     else:
-                        error = f"Invalid option index {correct}. Must be between 1 and {len(options)}"
+                        error = "correct_answer must match one of the 4 options exactly (or be an index 1-4)"
 
             preview_data.append({
                 "question_text": q_text,
-                "type": q_type,
+                "type": "mcq",
                 "options_list": options,
-                "correct_answer": correct,
-                "marks": marks,
-                "explanation": explanation,
+                "correct_answer": correct_resolved if not error else correct,
+                "marks": 1,
+                "explanation": None,
                 "error": error
             })
 
         except Exception as e:
             preview_data.append({
                 "question_text": str(row.get('question', 'Unknown')),
-                "error": str(e)
+                "type": "mcq",
+                "options_list": [],
+                "correct_answer": "",
+                "marks": 1,
+                "explanation": None,
+                "error": f"Failed to parse row: {str(e)}"
             })
 
     return {"questions": preview_data}
@@ -1330,7 +1982,7 @@ async def bulk_preview_quiz(
 @router.post("/modules/{module_id}/quizzes/bulk-confirm")
 async def bulk_confirm_quiz(
     module_id: int, 
-    body: dict, # List of validated questions
+    body: dict, # List of validated questions and time_limit
     db: Session = Depends(get_db), 
     current_user=Depends(require_roles(["admin"]))
 ):
@@ -1338,8 +1990,16 @@ async def bulk_confirm_quiz(
     if not questions_data:
         raise HTTPException(status_code=400, detail="No questions provided")
 
+    time_limit = body.get("time_limit", 20)
+    try:
+        time_limit = int(time_limit)
+        if time_limit < 1 or time_limit > 180:
+            time_limit = 20
+    except:
+        time_limit = 20
+
     quiz_title = f"Bulk Upload - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    new_quiz = Quiz(module_id=module_id, title=quiz_title)
+    new_quiz = Quiz(module_id=module_id, title=quiz_title, time_limit=time_limit)
     db.add(new_quiz)
     db.flush()
 
@@ -1363,45 +2023,91 @@ async def bulk_confirm_quiz(
 
 @router.get("/quizzes/sample-template")
 async def download_quiz_template(current_user=Depends(require_roles(["admin"]))):
-    # Create sample data
+    # Create sample data for new MCQ-only format with 10 high-quality questions
     data = [
         {
-            "question": "What is the capital of France?",
-            "type": "mcq",
-            "option1": "London",
-            "option2": "Paris",
-            "option3": "Berlin",
-            "option4": "Madrid",
-            "option5": "",
-            "correct_answer": "2",
-            "marks": 5,
-            "explanation": "Paris is the capital and largest city of France.",
-            "difficulty": "Easy",
-            "topic": "Geography"
+            "question": "What is the primary purpose of a Lockout/Tagout (LOTO) safety procedure?",
+            "option1": "To speed up machine maintenance",
+            "option2": "To prevent accidental energy release during servicing",
+            "option3": "To label defective tools in storage",
+            "option4": "To track employee shift hours",
+            "correct_answer": "To prevent accidental energy release during servicing"
         },
         {
-            "question": "The chemical symbol for water is ___.",
-            "type": "fill",
-            "option1": "", "option2": "", "option3": "", "option4": "", "option5": "",
-            "correct_answer": "H2O",
-            "marks": 2,
-            "explanation": "Water is H2O.",
-            "difficulty": "Easy",
-            "topic": "Science"
+            "question": "Which color is universally used on industrial signs to indicate danger?",
+            "option1": "Blue",
+            "option2": "Yellow",
+            "option3": "Red",
+            "option4": "Green",
+            "correct_answer": "Red"
         },
         {
-            "question": "Briefly explain the theory of relativity.",
-            "type": "short",
-            "option1": "", "option2": "", "option3": "", "option4": "", "option5": "",
-            "correct_answer": "Einstein's theory...",
-            "marks": 10,
-            "explanation": "Relativity...",
-            "difficulty": "Hard",
-            "topic": "Physics"
+            "question": "What does the abbreviation PPE stand for in workplace safety manuals?",
+            "option1": "Personal Protective Equipment",
+            "option2": "Preventative Plan Estimate",
+            "option3": "Process Pipeline Engineering",
+            "option4": "Product Performance Evaluation",
+            "correct_answer": "Personal Protective Equipment"
+        },
+        {
+            "question": "Which tool is commonly used to test the vertical alignment of a wall during masonry construction?",
+            "option1": "Spirit Level",
+            "option2": "Plumb Bob",
+            "option3": "Measuring Tape",
+            "option4": "Chalk Line",
+            "correct_answer": "Plumb Bob"
+        },
+        {
+            "question": "What is the primary structural function of concrete reinforcement steel bars (rebars)?",
+            "option1": "To reduce cement shrinkage",
+            "option2": "To provide tensile strength",
+            "option3": "To prevent water penetration",
+            "option4": "To increase concrete density",
+            "correct_answer": "To provide tensile strength"
+        },
+        {
+            "question": "Which soil type generally has the lowest bearing capacity for heavy civil engineering foundations?",
+            "option1": "Gravel",
+            "option2": "Coarse Sand",
+            "option3": "Dense Clay",
+            "option4": "Soft Silt",
+            "correct_answer": "Soft Silt"
+        },
+        {
+            "question": "What is the standard angle for placing a straight ladder against a vertical wall for safe climbing?",
+            "option1": "45 degrees",
+            "option2": "60 degrees",
+            "option3": "75 degrees",
+            "option4": "90 degrees",
+            "correct_answer": "75 degrees"
+        },
+        {
+            "question": "Which of the following describes the correct ergonomic posture when lifting a heavy box?",
+            "option1": "Bend at the waist with straight legs",
+            "option2": "Bend at the knees with a straight back",
+            "option3": "Twist the torso while lifting upwards",
+            "option4": "Keep the load at arm's length from the body",
+            "correct_answer": "Bend at the knees with a straight back"
+        },
+        {
+            "question": "Which unit is universally used to measure electrical current in power systems?",
+            "option1": "Volt",
+            "option2": "Ampere",
+            "option3": "Ohm",
+            "option4": "Watt",
+            "correct_answer": "Ampere"
+        },
+        {
+            "question": "Which of the following raw materials is considered the best conductor of electricity?",
+            "option1": "Copper",
+            "option2": "Glass",
+            "option3": "Rubber",
+            "option4": "Wood",
+            "correct_answer": "Copper"
         }
     ]
-    
-    df = pd.DataFrame(data)
+    # Enforce order of columns
+    df = pd.DataFrame(data, columns=['question', 'option1', 'option2', 'option3', 'option4', 'correct_answer'])
     
     # Save to buffer
     output = io.BytesIO()
@@ -1472,15 +2178,34 @@ def get_quiz(quiz_id: int, db: Session = Depends(get_db), current_user=Depends(g
             unique_questions.append(q)
             seen_q_ids.add(q.id)
 
-    quiz_data = {"id": quiz.id, "title": quiz.title, "questions": [
-        {
+    questions_list = []
+    import json
+    for q in unique_questions:
+        options_list = []
+        try:
+            if q.options:
+                options_list = json.loads(q.options) if isinstance(q.options, str) else q.options
+        except:
+            pass
+        
+        questions_list.append({
             "id": q.id, 
             "type": q.type,
             "question_text": q.question_text, 
             "options": q.options,
+            "option_1": options_list[0] if len(options_list) > 0 else "",
+            "option_2": options_list[1] if len(options_list) > 1 else "",
+            "option_3": options_list[2] if len(options_list) > 2 else "",
+            "option_4": options_list[3] if len(options_list) > 3 else "",
             "marks": q.marks
-        } for q in unique_questions
-    ]}
+        })
+
+    quiz_data = {
+        "id": quiz.id, 
+        "title": quiz.title, 
+        "time_limit": quiz.time_limit,
+        "questions": questions_list
+    }
     if current_user["role"] == "admin":
         for i, q in enumerate(unique_questions):
             quiz_data["questions"][i]["correct_answer"] = q.correct_answer
@@ -1493,7 +2218,7 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
         
-    total_marks = sum((q.marks if q.marks is not None else 1) for q in quiz.questions)
+    total_marks = len(quiz.questions)
     earned_marks = 0.0
     question_map = {q.id: q for q in quiz.questions}
     
@@ -1550,7 +2275,7 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
             print(f"[QUIZ DEBUG] QID: {q.id} | User: '{ans.answer}' (norm: '{norm_user}') | Correct: '{q.correct_answer}' (norm: '{norm_correct}') | Type: {q.type} | Match: {is_correct}")
 
             if is_correct:
-                earned_marks += (q.marks if q.marks is not None else 1)
+                earned_marks += 1.0
             
             # Avoid duplicate entries in result map if the same question is sent twice
             user_answers_map[ans.question_id] = {
@@ -1558,13 +2283,14 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
                 "is_correct": is_correct,
                 "correct_answer": q.correct_answer,
                 "explanation": q.explanation,
-                "marks_earned": (q.marks if q.marks is not None else 1) if is_correct else 0
+                "marks_earned": 1 if is_correct else 0
             }
         else:
             raise HTTPException(status_code=400, detail=f"Question ID {ans.question_id} not in this quiz")
     
     percentage = round((earned_marks / total_marks) * 100, 2) if total_marks > 0 else 0
-    status = "PASSED" if percentage >= 60 else "FAILED"
+    # Passing criteria: score >= 7 -> PASS, score < 7 -> FAIL
+    status = "PASSED" if earned_marks >= 7 else "FAILED"
     
     # Get previous attempts to set attempt_number
     prev_attempts_count = db.query(QuizAttempt).filter(
@@ -1613,7 +2339,7 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
         company_id=current_user.get("company_id"),
         user_id=current_user["id"],
         action="Quiz Attempted",
-        details=f"Scored {percentage}% on '{quiz.title}'. Status: {status}"
+        details=f"Scored {earned_marks}/{total_marks} on '{quiz.title}'. Status: {status}"
     )
     db.add(log)
     
@@ -1695,16 +2421,46 @@ def attempt_quiz(quiz_id: int, body: AttemptQuizRequest, db: Session = Depends(g
         "attempt_number": attempt.attempt_number,
         "attempted_at": attempt.attempted_at,
         "time_taken": attempt.time_taken,
-        "results": user_answers_map
+        "results": user_answers_map,
+        "correct_answers": int(attempt.score),
+        "total_questions": attempt.total_marks
     }
+
+@router.get("/quiz-attempts")
+def get_quiz_attempts(
+    quiz_id: int,
+    user_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    target_user_id = user_id if user_id is not None else current_user["id"]
+    if target_user_id != current_user["id"] and current_user.get("role") not in ["admin", "hr", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Not authorized to view other user's attempts")
+        
+    attempts = db.query(QuizAttempt).filter(
+        QuizAttempt.quiz_id == quiz_id,
+        QuizAttempt.user_id == target_user_id
+    ).order_by(QuizAttempt.attempt_number.desc()).all()
+    
+    return [
+        {
+            "id": a.id,
+            "score": a.score,
+            "total_marks": a.total_marks,
+            "percentage": a.percentage,
+            "status": a.status,
+            "attempt_number": a.attempt_number,
+            "attempted_at": a.attempted_at,
+            "time_taken": a.time_taken
+        }
+        for a in attempts
+    ]
 
 # ── Submissions ───────────────────────────────────────────────────────────────
 
 @router.post("/modules/{module_id}/submit")
-async def submit_assignment(module_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["employee", "admin"]))):
-    allowed_extensions = [".zip", ".rar", ".7z", ".pdf", ".doc", ".docx", ".txt", ".ppt", ".pptx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"]
-    if not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload a standard document, image, or archive.")
+async def submit_assignment(module_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["employee", "admin"]))):
+    validate_and_log_upload(file, "document", db, request, current_user, "submissions", allow_archives=True)
     
     # Local File Upload
     file_url = save_file_locally(file, folder="submissions")
@@ -1786,16 +2542,6 @@ async def submit_assignment(module_id: int, file: UploadFile = File(...), db: Se
                 ))
                 db.commit()
 
-    # Log Activity for submission
-    log = ActivityLog(
-        company_id=current_user.get("company_id"),
-        user_id=current_user["id"],
-        action="Assignment Submitted",
-        details=f"Uploaded solution for module ID: {module_id}"
-    )
-    db.add(log)
-    db.commit()
-    
     db.commit()
     db.refresh(new_submission)
     return {"message": "Assignment submitted successfully", "submission_id": new_submission.id, "file_url": file_url}
@@ -1821,11 +2567,54 @@ def get_all_submissions(current_user=Depends(require_roles(["admin", "hr", "supe
 @router.get("/my-submissions")
 def get_my_submissions(current_user=Depends(require_roles(["employee", "admin"])), db: Session = Depends(get_db)):
     submissions = db.query(Submission).filter(Submission.user_id == current_user["id"]).options(joinedload(Submission.module)).all()
-    return [{"id": s.id, "module_title": s.module.title, "file_url": s.file_url, "submitted_at": s.submitted_at} for s in submissions]
+    return [{"id": s.id, "module_id": s.module_id, "module_title": s.module.title, "file_url": s.file_url, "submitted_at": s.submitted_at} for s in submissions]
+
 @router.delete("/submissions/{submission_id}")
-def delete_submission(submission_id: int, db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr"]))):
+def delete_submission(submission_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
-    if not submission: raise HTTPException(status_code=404, detail="Submission not found")
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+        
+    # Security Ownership Check: only admin, hr, or the submission owner can delete
+    if current_user["role"] not in ["admin", "hr"] and submission.user_id != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this submission")
+        
+    user_id = submission.user_id
+    module_id = submission.module_id
+    
     db.delete(submission)
+    
+    # Sync with UserProgress record to reset submission status
+    progress = db.query(UserProgress).filter(
+        UserProgress.user_id == user_id,
+        UserProgress.module_id == module_id
+    ).first()
+    if progress:
+        progress.assignment_submitted = False
+        progress.is_completed = False
+        
     db.commit()
     return {"message": "Submission deleted"}
+
+
+@router.get("/audit-logs")
+def get_audit_logs(db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "super_admin"]))):
+    from models import AuditLog
+    company_id = current_user.get("company_id")
+    query = db.query(AuditLog)
+    if company_id:
+        query = query.filter(AuditLog.company_id == company_id)
+    logs = query.order_by(AuditLog.timestamp.desc()).all()
+    
+    return [
+        {
+            "id": l.id,
+            "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "",
+            "actor_name": l.actor_name or "System",
+            "actor_role": l.actor_role or "system",
+            "action": l.action,
+            "target": l.target or "N/A",
+            "details": l.details or ""
+        } for l in logs
+    ]
+

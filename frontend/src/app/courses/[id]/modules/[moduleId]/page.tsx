@@ -6,8 +6,8 @@ import { api } from '@/lib/api';
 import BackNavigation from '@/components/common/BackNavigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { 
-  PlayCircle, CheckCircle2, Video, 
+import {
+  PlayCircle, CheckCircle2, Video,
   ExternalLink, Loader2, Clock,
   ChevronRight, Bookmark, Trophy,
   FileText, Download, List,
@@ -31,10 +31,13 @@ declare global {
   }
 }
 
+const thumbnailCache: Record<string, string> = {};
+
 function VideoThumbnail({ video }: { video: any }) {
   const thumbnailPlaceholder = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60`;
   const [realUrl, setRealUrl] = useState<string | null>(null);
   const [videoError, setVideoError] = useState(false);
+  const [capturedThumbnail, setCapturedThumbnail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!video || !video.video_url) return;
@@ -64,6 +67,68 @@ function VideoThumbnail({ video }: { video: any }) {
     }
   }, [video]);
 
+  useEffect(() => {
+    if (!realUrl) return;
+
+    // Check if YouTube or Cloudflare
+    const isYt = video.video_url.includes('youtube.com') || video.video_url.includes('youtu.be') || video.video_url.includes('youtube-nocookie.com');
+    const isCf = video.video_url.includes('cloudflarestream.com') || video.video_url.includes('videodelivery.net');
+    if (isYt || isCf) return;
+
+    if (thumbnailCache[realUrl]) {
+      setCapturedThumbnail(thumbnailCache[realUrl]);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const videoEl = document.createElement('video');
+    videoEl.src = realUrl;
+    videoEl.crossOrigin = 'anonymous'; // Important for CORS
+    videoEl.preload = 'auto';
+    videoEl.muted = true;
+    videoEl.playsInline = true;
+    videoEl.currentTime = 0; // Seek to 0 seconds
+
+    const handleCapture = () => {
+      if (isCancelled) return;
+      if (videoEl.videoWidth === 0 || videoEl.videoHeight === 0) return;
+
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg');
+          thumbnailCache[realUrl] = dataUrl;
+          setCapturedThumbnail(dataUrl);
+        }
+      } catch (err) {
+        console.error("Failed to capture video frame via canvas:", err);
+      }
+    };
+
+    videoEl.addEventListener('loadeddata', handleCapture);
+    videoEl.addEventListener('seeked', handleCapture);
+    videoEl.addEventListener('error', (err) => {
+      console.warn("Video element failed to load for thumbnail capture:", err);
+    });
+
+    videoEl.load();
+
+    return () => {
+      isCancelled = true;
+      videoEl.removeEventListener('loadeddata', handleCapture);
+      videoEl.removeEventListener('seeked', handleCapture);
+      videoEl.src = '';
+      try {
+        videoEl.load();
+      } catch (e) {}
+    };
+  }, [realUrl, video]);
+
   if (!video) {
     return <img src={thumbnailPlaceholder} alt="Placeholder" className="w-full h-full object-cover" />;
   }
@@ -73,9 +138,9 @@ function VideoThumbnail({ video }: { video: any }) {
   if (ytMatch && ytMatch[1] && ytMatch[1].trim().length === 11) {
     const ytId = ytMatch[1].trim();
     return (
-      <img 
-        src={`https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`} 
-        alt={video.title} 
+      <img
+        src={`https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`}
+        alt={video.title}
         className="w-full h-full object-cover"
         onError={(e) => {
           (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
@@ -89,13 +154,31 @@ function VideoThumbnail({ video }: { video: any }) {
   if (cfMatch && cfMatch[1]) {
     const cfId = cfMatch[1];
     return (
-      <img 
+      <img
         src={`https://videodelivery.net/${cfId}/thumbnails/thumbnail.jpg?time=2s&height=360`}
         alt={video.title}
         className="w-full h-full object-cover"
         onError={(e) => {
           (e.target as HTMLImageElement).src = thumbnailPlaceholder;
         }}
+      />
+    );
+  }
+
+  // Render captured static thumbnail image if available
+  if (capturedThumbnail) {
+    return <img src={capturedThumbnail} alt={video.title} className="w-full h-full object-cover" />;
+  }
+
+  // Fallback to video element at t=0.001 seconds during loading or if canvas capture fails
+  if (realUrl && !videoError) {
+    return (
+      <video
+        src={`${realUrl}#t=0.001`}
+        preload="metadata"
+        muted
+        playsInline
+        className="w-full h-full object-cover pointer-events-none"
       />
     );
   }
@@ -107,7 +190,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
   const router = useRouter();
   const startModuleId = parseInt(moduleId);
   const { user } = useAuth();
-  
+
   const [course, setCourse] = useState<any>(null);
   const [modules, setModules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,9 +200,11 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
   const [activeTab, setActiveTab] = useState('video');
   const [selectedVideo, setSelectedVideo] = useState<any>(null);
   const [progressData, setProgressData] = useState<Record<number, any>>({});
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [apiReady, setApiReady] = useState(false);
   const [secureVideoUrl, setSecureVideoUrl] = useState<string | null>(null);
   const [videoLoadingError, setVideoLoadingError] = useState<string | null>(null);
+  const [videoFinished, setVideoFinished] = useState(false);
   const accessChecked = useRef(false);
 
   const playerInstance = useRef<any>(null);
@@ -138,8 +223,8 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         } catch (err: any) {
           // 403 = not enrolled, any other error = let it through
           if (err.message?.toLowerCase().includes('not enrolled') ||
-              err.message?.toLowerCase().includes('access') ||
-              err.message?.toLowerCase().includes('expired')) {
+            err.message?.toLowerCase().includes('access') ||
+            err.message?.toLowerCase().includes('expired')) {
             setNotEnrolled(true);
             setAccessError(err.message);
             setLoading(false);
@@ -148,16 +233,16 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
           // Non-403 errors: continue loading (admin/hr users hit this)
         }
       }
-      
+
       const courseData = await api.common.getCourse(parseInt(id));
       if (!refreshProgressOnly) setCourse(courseData);
-      
+
       const modulesData = await api.common.getModulesByCourse(parseInt(id)) || [];
       if (!refreshProgressOnly) setModules(modulesData);
 
       // Fetch progress for all modules (only if there are modules)
       if (modulesData.length > 0) {
-        const progressPromises = modulesData.map((m: any) => 
+        const progressPromises = modulesData.map((m: any) =>
           api.employee.getModuleProgressDetail(parseInt(id), m.id)
             .catch(() => ({ module_id: m.id })) // Gracefully handle per-module failures
         );
@@ -165,6 +250,16 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         const progressMap: Record<number, any> = {};
         progressResults.forEach(p => { if (p?.module_id) progressMap[p.module_id] = p; });
         setProgressData(progressMap);
+
+        // Fetch employee submissions
+        if (user?.role === 'employee') {
+          try {
+            const subs = await api.employee.getMySubmissions();
+            setSubmissions(subs);
+          } catch (e) {
+            console.error("Failed to load employee submissions:", e);
+          }
+        }
 
         if (!refreshProgressOnly) {
           let initialMod = modulesData[0];
@@ -204,7 +299,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     if (window.YT && window.YT.Player) setApiReady(true);
 
     return () => {
-      if (playerInstance.current) try { playerInstance.current.destroy(); } catch (e) {}
+      if (playerInstance.current) try { playerInstance.current.destroy(); } catch (e) { }
       if (progressInterval.current) clearInterval(progressInterval.current);
     };
   }, [fetchCourseData]);
@@ -234,6 +329,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
       try {
         if (playerReady.current && playerInstance.current && typeof playerInstance.current.loadVideoById === 'function') {
           try {
+            setVideoFinished(false);
             playerInstance.current.loadVideoById(videoId);
             return;
           } catch (loadErr) {
@@ -253,10 +349,10 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         height: '100%',
         width: '100%',
         videoId: videoId,
-        playerVars: { 
+        playerVars: {
           'playsinline': 1,
           'modestbranding': 1,
-          'rel': 0, 
+          'rel': 0,
           'autoplay': 1,
           'enablejsapi': 1,
           'showinfo': 0,
@@ -268,10 +364,11 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
             startProgressTracking();
           },
           'onStateChange': (event: any) => {
-             // 0 is ended
-             if (event.data === 0) {
-               handleVideoComplete(video.id);
-             }
+            // 0 is ended
+            if (event.data === 0) {
+              handleVideoComplete(video.id);
+              setVideoFinished(true);
+            }
           }
         }
       });
@@ -296,16 +393,16 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     }, 10000); // Sync every 10s to be polite
   };
 
-   const updateVideoProgress = async (videoId: number, seconds: number, completed = false) => {
+  const updateVideoProgress = async (videoId: number, seconds: number, completed = false) => {
     if (!activeModule?.id || !videoId) return;
     try {
-      await api.employee.updateVideoProgress({ 
+      await api.employee.updateVideoProgress({
         module_id: activeModule.id,
-        video_id: videoId, 
+        video_id: videoId,
         watched_seconds: seconds,
         completed: completed
       });
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const handleVideoComplete = async (videoId: number) => {
@@ -316,6 +413,54 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
     } finally {
       // Always refresh to ensure UI reflects latest state
       await fetchCourseData(true);
+    }
+  };
+
+  // Employee Submission Handlers
+  const editFileRef = useRef<HTMLInputElement>(null);
+  const [editingSubmissionId, setEditingSubmissionId] = useState<number | null>(null);
+
+  const handleDeleteSubmission = async (submissionId: number) => {
+    if (!confirm("Are you sure you want to delete your submission? This will reset your progress for this module.")) return;
+    try {
+      setLoading(true);
+      await api.request(`/submissions/${submissionId}`, { method: 'DELETE' });
+      toast.success("Submission deleted successfully");
+      await fetchCourseData(true);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete submission");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditSubmission = (submissionId: number) => {
+    setEditingSubmissionId(submissionId);
+    editFileRef.current?.click();
+  };
+
+  const handleEditFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingSubmissionId) return;
+
+    setLoading(true);
+    try {
+      // 1. Delete old submission
+      await api.request(`/submissions/${editingSubmissionId}`, { method: 'DELETE' });
+
+      // 2. Submit new file
+      const formData = new FormData();
+      formData.append('file', file);
+      await api.employee.submitAssignment(activeModule.id, formData);
+
+      toast.success("Submission updated successfully!");
+      await fetchCourseData(true);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update submission");
+    } finally {
+      setLoading(false);
+      setEditingSubmissionId(null);
+      if (editFileRef.current) editFileRef.current.value = '';
     }
   };
 
@@ -346,14 +491,14 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
   // SAFE Progress Booleans
   const totalVideos = activeModule?.videos?.length || 0;
   const completedVideos = currProg?.videos?.filter((v: any) => v?.is_completed)?.length || 0;
-  
+
   // A module's videos are done if there are no videos, or if all videos are completed
   const videosDone = totalVideos === 0 || (totalVideos > 0 && completedVideos >= totalVideos);
-  
+
   // Notes are done if they don't exist or if marked completed
   const hasNotes = (activeModule?.notes?.length || 0) > 0;
   const notesDone = !hasNotes || currProg?.notes_completed === true;
-  
+
   // Assignments are done if they don't exist or if submitted
   const hasAssignment = (activeModule?.assignments?.length || 0) > 0;
   const assignmentDone = !hasAssignment || currProg?.assignment_completed === true;
@@ -421,9 +566,9 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
   const handleMarkNotesRead = async () => {
     if (!activeModule) return;
     try {
-      await api.employee.markNotesComplete({ 
-        module_id: activeModule.id, 
-        completed: true 
+      await api.employee.markNotesComplete({
+        module_id: activeModule.id,
+        completed: true
       });
       toast.success("Notes marked as read!");
       await fetchCourseData(true);
@@ -443,15 +588,16 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         }
       }
     }
-    
+
     window.history.pushState(null, '', `/courses/${id}/modules/${mod.id}`);
-    
+
     setActiveModule(mod);
     setSelectedVideo(null);
     setActiveTab('video');
   };
 
   const handleVideoSelect = (video: any) => {
+    setVideoFinished(false);
     const vidIdx = activeModule.videos.indexOf(video);
     if (vidIdx > 0) {
       const prevVid = activeModule.videos[vidIdx - 1];
@@ -493,10 +639,10 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
       const idx = url.indexOf('/uploads/');
       targetUrl = url.substring(idx);
     }
-    
+
     // Append the download parameter so the backend knows to attach instead of preview
     const downloadUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + 'download=true';
-    
+
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.download = filename || '';
@@ -566,18 +712,18 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
             </div>
             <span>Back</span>
           </Button>
-          
+
           <div className="flex-1" />
-          
+
           <div className="flex items-center gap-4">
             <div className="hidden md:flex flex-col items-end">
-               <p className="text-[10px] font-bold text-gray-400 uppercase">Overall Progress</p>
-               <div className="flex items-center gap-2">
-                 <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                   <div className="h-full bg-green-500" style={{ width: `${overallProgress}%` }} />
-                 </div>
-                 <span className="text-xs font-bold text-green-600">{overallProgress}%</span>
-               </div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Overall Progress</p>
+              <div className="flex items-center gap-2">
+                <div className="w-32 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-500" style={{ width: `${overallProgress}%` }} />
+                </div>
+                <span className="text-xs font-bold text-green-600">{overallProgress}%</span>
+              </div>
             </div>
           </div>
         </div>
@@ -585,9 +731,18 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
 
       {/* 2. MAIN FULL WIDTH WORKSPACE LAYOUT */}
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
-        
+
         {/* Module Title Header */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="space-y-1">
+          {(() => {
+            const idx = modules.findIndex(m => m.id === activeModule?.id);
+            const moduleNumberLabel = idx !== -1 ? `Module ${idx + 1}` : "Module";
+            return (
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
+                {moduleNumberLabel}
+              </span>
+            );
+          })()}
           <h1 className="text-2xl font-bold text-[#111] tracking-tight">{activeModule?.title || course?.title}</h1>
         </div>
 
@@ -603,6 +758,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
             return (
               <button
                 key={pill.id}
+                id={`tour-module-tab-${pill.id}`}
                 onClick={() => {
                   if (!pill.locked) {
                     setActiveTab(pill.id);
@@ -629,14 +785,17 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
         {/* 4. MAIN CONTENT WORKSPACE */}
         <div className="min-h-[500px] pt-4">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-[#F26522]" /></div>}>
-            
+
             {/* ── VIDEO TAB CONTENT ── */}
             {activeTab === 'video' && (
               <>
                 {/* IF VIDEO SELECT PLAYER OPEN */}
                 {selectedVideo !== null ? (
                   <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto">
-                    <div className="relative aspect-video bg-[#0a0a0a] rounded-2xl overflow-hidden shadow-lg border border-gray-250">
+                    <div 
+                      key={selectedVideo?.id}
+                      className="relative aspect-video bg-[#0a0a0a] rounded-2xl overflow-hidden shadow-lg border border-gray-250"
+                    >
                       {videoLoadingError ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 space-y-4">
                           <AlertCircle className="w-12 h-12 opacity-30" />
@@ -652,7 +811,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                           <div id="youtube-player-element" className="w-full h-full" />
                         </div>
                       ) : (
-                        <video 
+                        <video
                           key={secureVideoUrl}
                           src={secureVideoUrl}
                           className="w-full h-full object-contain"
@@ -660,12 +819,66 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                           autoPlay
                           playsInline
                           controlsList="nodownload"
-                          onEnded={() => handleVideoComplete(selectedVideo.id)}
+                          disablePictureInPicture
+                          onEnded={() => {
+                            handleVideoComplete(selectedVideo.id);
+                            setVideoFinished(true);
+                          }}
                         >
                           Your browser does not support the video tag.
                         </video>
                       )}
                     </div>
+
+                    {/* Navigation Buttons Row */}
+                    {(() => {
+                      const videosList = activeModule?.videos || [];
+                      const currentVideoIndex = videosList.findIndex((v: any) => v.id === selectedVideo?.id);
+                      const hasPrevVideo = currentVideoIndex > 0;
+                      const hasNextVideo = currentVideoIndex !== -1 && currentVideoIndex < videosList.length - 1;
+
+                      return (
+                        <div className="flex items-center justify-between gap-4 pt-1">
+                          {hasPrevVideo ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const prevVideo = videosList[currentVideoIndex - 1];
+                                setSelectedVideo(prevVideo);
+                                setVideoFinished(false);
+                              }}
+                              className="flex items-center gap-1.5 h-9 rounded-xl border-gray-250 text-gray-700 hover:text-gray-900 hover:bg-gray-50 font-semibold text-xs"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                              <span>Previous Video</span>
+                            </Button>
+                          ) : (
+                            <div />
+                          )}
+
+                          {hasNextVideo && (
+                            <Button
+                              variant={videoFinished ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => {
+                                const nextVideo = videosList[currentVideoIndex + 1];
+                                handleVideoSelect(nextVideo);
+                              }}
+                              className={cn(
+                                "flex items-center gap-1.5 h-9 rounded-xl font-semibold text-xs transition-all duration-300",
+                                videoFinished
+                                  ? "bg-[#F26522] hover:bg-[#D54D10] border-[#F26522] text-white shadow-md shadow-orange-100"
+                                  : "border-gray-250 text-gray-700 hover:text-gray-900 hover:bg-gray-50"
+                              )}
+                            >
+                              <span>Next Video</span>
+                              <ChevronRight className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     <div className="space-y-4 pt-2">
                       <div className="flex items-center justify-between gap-4">
@@ -698,9 +911,9 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                         activeModule.videos.map((video: any, vIdx: number) => {
                           const isLocked = isVideoLocked(video);
                           const isCompleted = progressData[activeModule.id]?.videos?.find((v: any) => v.video_id === video.id)?.is_completed;
-                          
+
                           return (
-                            <div 
+                            <div
                               key={video.id}
                               onClick={() => {
                                 if (isLocked) {
@@ -740,7 +953,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                                   </div>
                                 )}
                               </div>
-                              
+
                               {/* Metadata */}
                               <div className="flex gap-3 px-1 justify-between">
                                 <div className="flex gap-3 min-w-0">
@@ -788,7 +1001,7 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                   </div>
                   <div className="flex items-center gap-3">
                     {!notesDone && activeModule?.notes?.length > 0 && (
-                      <Button 
+                      <Button
                         onClick={handleMarkNotesRead}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider h-10 px-5 rounded-xl shadow-sm"
                       >
@@ -824,9 +1037,14 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                         </div>
                         <div className="flex items-center gap-3 pt-2">
                           <a href={note.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1 rounded-xl font-bold text-xs uppercase h-10 border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 bg-white")}>Preview</a>
-                          <a href={note.file_url} download className={cn(buttonVariants({ variant: "outline", size: "icon" }), "w-10 h-10 rounded-xl border-gray-200 text-gray-500 hover:bg-blue-50 hover:text-blue-600 bg-white")}>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => handleFileDownload(note.file_url, note.file_name || `Study_Material_${i + 1}.pdf`)}
+                            className="w-10 h-10 rounded-xl border-gray-200 text-gray-500 hover:bg-blue-50 hover:text-blue-600 bg-white"
+                          >
                             <Download className="w-4 h-4" />
-                          </a>
+                          </Button>
                         </div>
                       </div>
                     ))
@@ -877,8 +1095,8 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                               <a href={task.file_url} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline" }), "rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-gray-600 flex items-center gap-1.5 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all bg-white")}>
                                 <Eye className="w-4 h-4" /> View Guide
                               </a>
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 onClick={() => handleFileDownload(task.file_url, task.title + ".pdf")}
                                 className="rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-gray-600 flex items-center gap-1.5 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all bg-white"
                               >
@@ -888,8 +1106,67 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
                           </div>
                         </div>
                       </Card>
-                      
-                      <SubmissionZone moduleId={activeModule.id} onSubmitted={() => fetchCourseData(true)} />
+
+                      {progressData[activeModule?.id || 0]?.assignment_completed ? (() => {
+                        const userSubmission = submissions.find((s: any) => s.module_id === activeModule?.id);
+                        return (
+                          <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                            <Card className="p-6 border border-emerald-100 bg-emerald-50/10 rounded-2xl space-y-4 shadow-sm">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600 border border-emerald-100 shrink-0">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Your Submission</p>
+                                    <h4 className="text-sm font-bold text-gray-900 leading-snug">{task.title}</h4>
+                                  </div>
+                                </div>
+                                <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-55 border border-emerald-100 font-bold text-xs rounded-full">
+                                  Submitted
+                                </Badge>
+                              </div>
+                              
+                              <div className="p-4 bg-white rounded-xl border border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm">
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                                  <a 
+                                    href={userSubmission ? userSubmission.file_url : '#'} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="font-bold text-[#F26522] hover:underline hover:text-[#D54D10] truncate max-w-[200px] sm:max-w-xs transition-colors"
+                                  >
+                                    {userSubmission ? userSubmission.file_url.split('/').pop() : 'View Submitted File'}
+                                  </a>
+                                </div>
+                                <span className="text-xs font-semibold text-gray-400">
+                                  Submitted on {userSubmission?.submitted_at ? new Date(userSubmission.submitted_at).toLocaleDateString() : new Date().toLocaleDateString()}
+                                </span>
+                              </div>
+                              
+                              <div className="flex gap-2 justify-end pt-2">
+                                <Button 
+                                  variant="outline" 
+                                  onClick={() => userSubmission && handleEditSubmission(userSubmission.id)}
+                                  className="h-10 rounded-xl font-bold text-xs uppercase border-gray-200 text-gray-600 hover:bg-gray-50 active:scale-95 transition-all shadow-sm"
+                                >
+                                  Edit File
+                                </Button>
+                                <Button 
+                                  variant="destructive" 
+                                  onClick={() => userSubmission && handleDeleteSubmission(userSubmission.id)}
+                                  className="h-10 rounded-xl font-bold text-xs uppercase active:scale-95 transition-all shadow-sm shadow-red-100"
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </Card>
+                            <input type="file" ref={editFileRef} className="hidden" onChange={handleEditFileChange} />
+                          </div>
+                        );
+                      })() : (
+                        <SubmissionZone moduleId={activeModule.id} onSubmitted={() => fetchCourseData(true)} />
+                      )}
                     </div>
                   ))
                 ) : (
@@ -946,6 +1223,54 @@ function LearnContent({ id, moduleId }: { id: string, moduleId: string }) {
           </Suspense>
         </div>
 
+        {/* BOTTOM MODULE NAVIGATION */}
+        {modules.length > 0 && (
+          (() => {
+            const currentModuleIndex = modules.findIndex(m => m.id === activeModule?.id);
+            if (currentModuleIndex === -1) return null;
+            const prevMod = currentModuleIndex > 0 ? modules[currentModuleIndex - 1] : null;
+            const nextMod = currentModuleIndex < modules.length - 1 ? modules[currentModuleIndex + 1] : null;
+            const isNextLocked = nextMod ? isModuleLocked(nextMod) : false;
+
+            return (
+              <div className="flex items-center justify-between pt-8 mt-12 border-t border-gray-200">
+                {prevMod ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => handleModuleClick(prevMod)}
+                    className="flex items-center gap-2 rounded-xl h-11 px-5 font-bold text-xs uppercase border-gray-200 text-[#6A6F73] hover:text-[#111] transition-all bg-white"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Previous Module
+                  </Button>
+                ) : (
+                  <div />
+                )}
+
+                {nextMod && (
+                  <Button
+                    onClick={() => {
+                      if (isNextLocked) {
+                        toast.error("Complete the current module first");
+                      } else {
+                        handleModuleClick(nextMod);
+                      }
+                    }}
+                    disabled={isNextLocked}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl h-11 px-5 font-bold text-xs uppercase transition-all",
+                      isNextLocked
+                        ? "bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed opacity-50"
+                        : "bg-[#F26522] hover:bg-[#D54D10] text-white shadow-sm hover:shadow-md"
+                    )}
+                  >
+                    Next Module {isNextLocked ? <Lock className="w-3.5 h-3.5" /> : <ChevronRight className="w-4 h-4" />}
+                  </Button>
+                )}
+              </div>
+            );
+          })()
+        )}
+
       </div>
     </div>
   );
@@ -975,33 +1300,33 @@ function SubmissionZone({ moduleId, onSubmitted }: { moduleId: number, onSubmitt
 
   return (
     <Card className="p-12 border-2 border-dashed border-gray-200 bg-gray-50/30 rounded-[2.5rem] text-center space-y-8 hover:bg-emerald-50/20 hover:border-emerald-200 transition-all duration-500">
-       <div className="space-y-3">
-          <h4 className="text-xl font-black text-[#111] tracking-tight">Submit Your Project</h4>
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Accepted: PDF, Office, Images, ZIP (Max 50MB)</p>
-       </div>
-       <input type="file" ref={fileRef} className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
-       {file ? (
-         <div className="flex flex-col items-center gap-6 animate-in zoom-in-95 duration-300">
-            <div className="px-8 py-5 bg-white rounded-2xl border border-emerald-100 flex items-center gap-4 shadow-sm">
-               <FileArchive className="w-6 h-6 text-emerald-600" />
-               <div className="text-left">
-                  <p className="text-sm font-black text-[#111] truncate max-w-[250px]">{file.name}</p>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase">Ready for upload</p>
-               </div>
-               <button onClick={() => setFile(null)} className="ml-4 text-gray-300 hover:text-red-500 transition-colors">
-                  <AlertCircle className="w-5 h-5" />
-               </button>
+      <div className="space-y-3">
+        <h4 className="text-xl font-black text-[#111] tracking-tight">Submit Your Project</h4>
+        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Accepted: PDF, Office, Images, ZIP (Max 50MB)</p>
+      </div>
+      <input type="file" ref={fileRef} className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
+      {file ? (
+        <div className="flex flex-col items-center gap-6 animate-in zoom-in-95 duration-300">
+          <div className="px-8 py-5 bg-white rounded-2xl border border-emerald-100 flex items-center gap-4 shadow-sm">
+            <FileArchive className="w-6 h-6 text-emerald-600" />
+            <div className="text-left">
+              <p className="text-sm font-black text-[#111] truncate max-w-[250px]">{file.name}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase">Ready for upload</p>
             </div>
-            <Button onClick={handleUpload} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black h-16 px-12 rounded-2xl shadow-xl hover:shadow-emerald-200/50 transition-all text-xs tracking-widest">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-3" /> : null}
-              {loading ? "UPLOADING..." : "CONFIRM SUBMISSION"}
-            </Button>
-         </div>
-       ) : (
-         <Button onClick={() => fileRef.current?.click()} variant="outline" className="h-20 px-12 border-2 border-gray-200 rounded-3xl bg-white shadow-sm hover:shadow-2xl hover:border-[#F26522]/30 hover:text-[#F26522] transition-all font-black uppercase text-[11px] tracking-[0.2em] gap-3">
-            <Folder className="w-6 h-6" /> SELECT PROJECT FILE
-         </Button>
-       )}
+            <button onClick={() => setFile(null)} className="ml-4 text-gray-300 hover:text-red-500 transition-colors">
+              <AlertCircle className="w-5 h-5" />
+            </button>
+          </div>
+          <Button onClick={handleUpload} disabled={loading} className="bg-emerald-600 hover:bg-emerald-700 text-white font-black h-16 px-12 rounded-2xl shadow-xl hover:shadow-emerald-200/50 transition-all text-xs tracking-widest">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-3" /> : null}
+            {loading ? "UPLOADING..." : "CONFIRM SUBMISSION"}
+          </Button>
+        </div>
+      ) : (
+        <Button onClick={() => fileRef.current?.click()} variant="outline" className="h-20 px-12 border-2 border-gray-200 rounded-3xl bg-white shadow-sm hover:shadow-2xl hover:border-[#F26522]/30 hover:text-[#F26522] transition-all font-black uppercase text-[11px] tracking-[0.2em] gap-3">
+          <Folder className="w-6 h-6" /> SELECT PROJECT FILE
+        </Button>
+      )}
     </Card>
   );
 }
@@ -1011,6 +1336,7 @@ function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => v
   const params = useParams();
   const id = params?.id as string;
   const moduleId = params?.moduleId as string;
+  const { user } = useAuth();
 
   const [quiz, setQuiz] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -1020,13 +1346,35 @@ function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => v
   const [timeLeft, setTimeLeft] = useState(1200);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [attempts, setAttempts] = useState<any[]>([]);
+
+  const passingScoreThreshold = quiz?.passing_score || 70;
+  const passingAttempts = attempts.filter((attempt) => 
+    attempt.status === 'PASSED' || attempt.percentage >= passingScoreThreshold
+  );
+  const hasPassed = passingAttempts.length > 0;
+  const bestPassingAttempt = hasPassed 
+    ? [...passingAttempts].sort((a, b) => b.percentage - a.percentage || b.attempt_number - a.attempt_number)[0]
+    : null;
 
   useEffect(() => {
-    api.common.getQuiz(quizId).then(res => {
-      setQuiz(res);
+    if (!quizId) return;
+    setLoading(true);
+    Promise.all([
+      api.common.getQuiz(quizId),
+      api.employee.getQuizAttempts(quizId, user?.id).catch(err => {
+        console.error("Failed to load attempts", err);
+        return [];
+      })
+    ]).then(([quizRes, attemptsRes]) => {
+      setQuiz(quizRes);
+      setAttempts(attemptsRes || []);
+      setLoading(false);
+    }).catch(err => {
+      console.error("Failed to load quiz data", err);
       setLoading(false);
     });
-  }, [quizId]);
+  }, [quizId, user?.id]);
 
   useEffect(() => {
     if (quizState !== 'active' || isSubmitting) return;
@@ -1059,9 +1407,9 @@ function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => v
         question_id: parseInt(qId),
         answer: ans  // backend AttemptQuizRequest expects "answer" not "answer_text"
       }));
-      const res = await api.employee.attemptQuiz(quiz.id, { 
-        answers: formattedAnswers, 
-        time_taken: (quiz?.time_limit ? quiz.time_limit * 60 : 1200) - timeLeft 
+      const res = await api.employee.attemptQuiz(quiz.id, {
+        answers: formattedAnswers,
+        time_taken: (quiz?.time_limit ? quiz.time_limit * 60 : 1200) - timeLeft
       });
       setResult(res);
       setQuizState('result');
@@ -1077,170 +1425,222 @@ function QuizTaker({ quizId, onComplete }: { quizId: number, onComplete: () => v
   if (loading) return <div className="py-24 flex justify-center"><Loader2 className="w-10 h-10 animate-spin text-[#F26522]" /></div>;
 
   return (
-    <Card className="border border-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl bg-white p-8 md:p-12 relative">
-       {quizState === 'idle' && (
-         <div className="space-y-10 py-6 text-center">
-            <div className="w-24 h-24 rounded-[2rem] bg-orange-50 text-[#F26522] flex items-center justify-center mx-auto shadow-sm border border-orange-100 animate-bounce-slow">
-               <Trophy className="w-12 h-12" />
-            </div>
-            <div className="space-y-2">
-               <h3 className="text-4xl font-black text-[#111] tracking-tight">{quiz.title}</h3>
-               <p className="text-sm text-gray-400 font-bold uppercase tracking-widest">Final Module Assessment</p>
-            </div>
-            
-            <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
-               <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Questions</p>
-                  <p className="text-2xl font-black text-[#111]">{quiz.questions?.length || 0}</p>
-               </div>
-               <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Duration</p>
-                  <p className="text-2xl font-black text-[#111]">{quiz.time_limit || 20}m</p>
-               </div>
-               <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Passing</p>
-                  <p className="text-2xl font-black text-emerald-600">{quiz.passing_score || 70}%</p>
-               </div>
-            </div>
+    <Card className="border border-gray-100 rounded-[2rem] overflow-hidden shadow-xl bg-white p-8 md:p-10 relative max-w-2xl mx-auto">
+      {quizState === 'idle' && (
+        <div className="space-y-8 py-6 text-center animate-in fade-in duration-500">
+          <div className="w-16 h-16 rounded-2xl bg-orange-50 text-[#F26522] flex items-center justify-center mx-auto shadow-sm border border-orange-100">
+            <Trophy className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">{quiz.title}</h3>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Final Module Assessment</p>
+          </div>
 
-            <Button 
-               onClick={() => router.push(`/courses/${id}/modules/${moduleId}/assessment`)} 
-               className="w-full max-w-md bg-[#111] hover:bg-black text-white h-20 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all"
-            >
-               BEGIN ASSESSMENT
-            </Button>
-         </div>
-       )}
+          <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto">
+            {[
+              { label: "Questions", value: `${quiz.questions?.length || 0} Items`, icon: List },
+              { label: "Duration", value: `${quiz.time_limit || 20} Min`, icon: Clock },
+              { label: "Passing Criteria", value: `${quiz.passing_score || 70}% Score`, icon: Trophy, color: "text-emerald-600" }
+            ].map((stat, i) => (
+              <div key={i} className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center shadow-sm">
+                <div className="flex items-center gap-1.5 mb-1 text-slate-400">
+                  <stat.icon className="w-3.5 h-3.5 shrink-0" />
+                  <p className="text-[8px] font-black uppercase tracking-wider">{stat.label}</p>
+                </div>
+                <p className={cn("text-xs font-black text-slate-900", stat.color)}>{stat.value}</p>
+              </div>
+            ))}
+          </div>
 
-       {quizState === 'active' && quiz.questions?.length > 0 && (
-         <div className="space-y-10">
-            <div className="flex items-center justify-between">
-               <div className="flex items-center gap-4">
-                  <Badge className="bg-[#111] text-white rounded-full px-5 py-2 font-black text-[10px] uppercase tracking-widest">
-                    Question {currentQuestionIndex + 1} / {quiz.questions.length}
-                  </Badge>
-                  <div className="h-4 w-px bg-gray-200" />
-                  <span className="text-xs font-black text-[#F26522] uppercase tracking-widest">
-                    {quiz.questions[currentQuestionIndex].marks} Marks
-                  </span>
-               </div>
-               <div className={cn(
-                 "flex items-center gap-3 px-6 py-3 rounded-2xl border-2 font-mono font-black text-lg shadow-sm transition-colors",
-                 timeLeft < 60 ? "bg-red-50 border-red-200 text-red-600 animate-pulse" : "bg-gray-50 border-gray-100 text-[#111]"
-               )}>
-                  <Clock className="w-6 h-6" />
-                  {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-               </div>
+          <div className="pt-2">
+            {hasPassed && bestPassingAttempt ? (
+              <div className="p-5 bg-emerald-50 border border-emerald-100 rounded-2xl max-w-sm mx-auto text-emerald-800 text-sm font-medium space-y-2 animate-in fade-in duration-300">
+                <div className="flex items-center justify-center gap-2 font-black text-emerald-900 uppercase text-[10px] tracking-wider">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Assessment Passed</span>
+                </div>
+                <p className="text-xs text-center leading-relaxed font-sans">
+                  You have already passed this quiz with {Math.round(bestPassingAttempt.percentage)}%. No retake allowed.
+                </p>
+                <div className="pt-2 text-[9px] font-black text-emerald-600/80 uppercase tracking-widest text-center border-t border-emerald-100/50 font-sans">
+                  Best Score: {bestPassingAttempt.score}/{bestPassingAttempt.total_marks} ({Math.round(bestPassingAttempt.percentage)}%) on {new Date(bestPassingAttempt.attempted_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                </div>
+              </div>
+            ) : (
+              <Button
+                onClick={() => router.push(`/courses/${id}/modules/${moduleId}/assessment`)}
+                className="w-full max-w-sm bg-slate-900 hover:bg-black text-white h-12 rounded-xl font-black uppercase text-[10px] tracking-[0.2em] shadow-lg hover:scale-[1.01] active:scale-95 transition-all"
+              >
+                BEGIN ASSESSMENT
+              </Button>
+            )}
+          </div>
+
+          <div className="pt-6 border-t border-slate-100 mt-6 text-left max-w-lg mx-auto w-full">
+            <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-4 text-center font-sans">Previous Attempts</h4>
+            {attempts.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center font-bold font-sans">No previous attempts yet</p>
+            ) : (
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 font-sans">
+                {attempts.map((attempt) => (
+                  <div key={attempt.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between shadow-sm">
+                    <div className="space-y-1">
+                      <p className="text-xs font-black text-slate-800">Attempt {attempt.attempt_number}</p>
+                      <p className="text-[10px] text-slate-400 font-bold">
+                        {new Date(attempt.attempted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="text-xs font-black text-slate-900">{attempt.score}/{attempt.total_marks}</p>
+                        <p className="text-[9px] text-slate-400 font-bold">({Math.round(attempt.percentage)}%)</p>
+                      </div>
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-widest border",
+                        attempt.status === 'PASSED' 
+                          ? "bg-emerald-50 border-emerald-100 text-emerald-700" 
+                          : "bg-red-50 border-red-100 text-red-700"
+                      )}>
+                        {attempt.status === 'PASSED' ? 'PASS' : 'FAIL'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {quizState === 'active' && quiz.questions?.length > 0 && (
+        <div className="space-y-10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Badge className="bg-[#111] text-white rounded-full px-5 py-2 font-black text-[10px] uppercase tracking-widest">
+                Question {currentQuestionIndex + 1} / {quiz.questions.length}
+              </Badge>
+              <div className="h-4 w-px bg-gray-200" />
+              <span className="text-xs font-black text-[#F26522] uppercase tracking-widest">
+                {quiz.questions[currentQuestionIndex].marks} Marks
+              </span>
             </div>
-
-            <div className="space-y-12">
-               <h3 className="text-3xl font-black text-[#111] leading-tight tracking-tight">
-                  {quiz.questions[currentQuestionIndex].question_text}
-               </h3>
-               
-               <div className="grid gap-4">
-                  {JSON.parse(quiz.questions[currentQuestionIndex].options || '[]').map((opt: string, i: number) => {
-                    const isSelected = answers[quiz.questions[currentQuestionIndex].id] === opt;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => handleOptionSelect(quiz.questions[currentQuestionIndex].id, opt)}
-                        className={cn(
-                          "w-full text-left p-6 rounded-2xl border-2 transition-all flex items-center gap-6 group relative overflow-hidden",
-                          isSelected 
-                            ? "bg-orange-50 border-[#F26522] text-[#111] shadow-md ring-1 ring-[#F26522]/20" 
-                            : "bg-white border-gray-100 hover:border-[#F26522]/30 text-[#111] hover:bg-gray-50"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 font-black text-sm transition-all",
-                          isSelected ? "bg-[#F26522] border-[#F26522] text-white rotate-[360deg]" : "bg-white border-gray-200 text-gray-400 group-hover:border-[#F26522]/50 group-hover:text-[#F26522]"
-                        )}>
-                          {String.fromCharCode(65 + i)}
-                        </div>
-                        <span className="text-lg font-bold">{opt}</span>
-                      </button>
-                    );
-                  })}
-               </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-10 border-t border-gray-100">
-               <Button 
-                 variant="ghost" 
-                 disabled={currentQuestionIndex === 0}
-                 onClick={() => setCurrentQuestionIndex(prev => prev - 1)}
-                 className="font-black text-[10px] uppercase tracking-[0.2em] text-gray-400 hover:text-[#111] px-8 h-14"
-               >
-                 <ChevronLeft className="w-5 h-5 mr-3" /> Back
-               </Button>
-               <Button 
-                 onClick={() => {
-                   if (currentQuestionIndex < quiz.questions.length - 1) setCurrentQuestionIndex(prev => prev + 1);
-                   else handleSubmit();
-                 }}
-                 disabled={isSubmitting}
-                 className="bg-[#111] hover:bg-black text-white px-12 h-16 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all hover:scale-105"
-               >
-                 {isSubmitting ? "PROCESSING..." : currentQuestionIndex === quiz.questions.length - 1 ? 'SUBMIT ASSESSMENT' : 'NEXT QUESTION'}
-                 {!isSubmitting && <ChevronRight className="w-5 h-5 ml-3" />}
-               </Button>
-            </div>
-         </div>
-       )}
-
-       {quizState === 'result' && result && (
-         <div className="text-center py-10 space-y-10 animate-in zoom-in-95 duration-500">
             <div className={cn(
-              "w-28 h-28 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl border-4 rotate-12 transition-transform hover:rotate-0 duration-500",
-              result.status === 'PASSED' ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-red-50 border-red-100 text-red-600"
+              "flex items-center gap-3 px-6 py-3 rounded-2xl border-2 font-mono font-black text-lg shadow-sm transition-colors",
+              timeLeft < 60 ? "bg-red-50 border-red-200 text-red-600 animate-pulse" : "bg-gray-50 border-gray-100 text-[#111]"
             )}>
-               {result.status === 'PASSED' ? <Trophy className="w-14 h-14" /> : <AlertCircle className="w-14 h-14" />}
+              <Clock className="w-6 h-6" />
+              {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
             </div>
-            
-            <div className="space-y-2">
-               <h2 className="text-4xl font-black text-[#111] tracking-tight">
-                 {result.status === 'PASSED' ? "CONGRATULATIONS!" : "KEEP PRACTICING!"}
-               </h2>
-               <p className="text-sm text-gray-400 font-bold uppercase tracking-[0.3em]">
-                 {result.status === 'PASSED' ? "You have mastered this module" : "Review the lectures and try again"}
-               </p>
-            </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-8 max-w-lg mx-auto">
-               <div className="p-8 bg-gray-50 rounded-[2rem] border border-gray-100 shadow-sm">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-3 tracking-widest">Final Score</p>
-                  <p className={cn("text-5xl font-black", result.status === 'PASSED' ? "text-emerald-600" : "text-red-600")}>
-                    {Math.round(result.percentage)}%
-                  </p>
-               </div>
-               <div className="p-8 bg-gray-50 rounded-[2rem] border border-gray-100 shadow-sm">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-3 tracking-widest">Status</p>
-                  <p className={cn("text-3xl font-black", result.status === 'PASSED' ? "text-emerald-600" : "text-red-600")}>
-                    {result.status}
-                  </p>
-               </div>
-            </div>
+          <div className="space-y-12">
+            <h3 className="text-3xl font-black text-[#111] leading-tight tracking-tight">
+              {quiz.questions[currentQuestionIndex].question_text}
+            </h3>
 
-            <div className="flex flex-col sm:flex-row justify-center gap-6 pt-6">
-               <Button 
-                 onClick={() => router.push('/dashboard')}
-                 className="bg-[#111] hover:bg-black text-white h-16 px-12 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl"
-               >
-                 RETURN TO DASHBOARD
-               </Button>
-               {result.status !== 'PASSED' && (
-                 <Button 
-                   variant="outline" 
-                   onClick={() => window.location.reload()}
-                   className="border-gray-200 text-gray-500 h-16 px-12 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-50 transition-all"
-                 >
-                   <RotateCcw className="w-5 h-5 mr-3" /> RETRY ASSESSMENT
-                 </Button>
-               )}
+            <div className="grid gap-4">
+              {JSON.parse(quiz.questions[currentQuestionIndex].options || '[]').map((opt: string, i: number) => {
+                const isSelected = answers[quiz.questions[currentQuestionIndex].id] === opt;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleOptionSelect(quiz.questions[currentQuestionIndex].id, opt)}
+                    className={cn(
+                      "w-full text-left p-6 rounded-2xl border-2 transition-all flex items-center gap-6 group relative overflow-hidden",
+                      isSelected
+                        ? "bg-orange-50 border-[#F26522] text-[#111] shadow-md ring-1 ring-[#F26522]/20"
+                        : "bg-white border-gray-100 hover:border-[#F26522]/30 text-[#111] hover:bg-gray-50"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 font-black text-sm transition-all",
+                      isSelected ? "bg-[#F26522] border-[#F26522] text-white rotate-[360deg]" : "bg-white border-gray-200 text-gray-400 group-hover:border-[#F26522]/50 group-hover:text-[#F26522]"
+                    )}>
+                      {String.fromCharCode(65 + i)}
+                    </div>
+                    <span className="text-lg font-bold">{opt}</span>
+                  </button>
+                );
+              })}
             </div>
-         </div>
-       )}
+          </div>
+
+          <div className="flex items-center justify-between pt-10 border-t border-gray-100">
+            <Button
+              variant="ghost"
+              disabled={currentQuestionIndex === 0}
+              onClick={() => setCurrentQuestionIndex(prev => prev - 1)}
+              className="font-black text-[10px] uppercase tracking-[0.2em] text-gray-400 hover:text-[#111] px-8 h-14"
+            >
+              <ChevronLeft className="w-5 h-5 mr-3" /> Back
+            </Button>
+            <Button
+              onClick={() => {
+                if (currentQuestionIndex < quiz.questions.length - 1) setCurrentQuestionIndex(prev => prev + 1);
+                else handleSubmit();
+              }}
+              disabled={isSubmitting}
+              className="bg-[#111] hover:bg-black text-white px-12 h-16 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all hover:scale-105"
+            >
+              {isSubmitting ? "PROCESSING..." : currentQuestionIndex === quiz.questions.length - 1 ? 'SUBMIT ASSESSMENT' : 'NEXT QUESTION'}
+              {!isSubmitting && <ChevronRight className="w-5 h-5 ml-3" />}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {quizState === 'result' && result && (
+        <div className="text-center py-10 space-y-10 animate-in zoom-in-95 duration-500">
+          <div className={cn(
+            "w-28 h-28 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl border-4 rotate-12 transition-transform hover:rotate-0 duration-500",
+            result.status === 'PASSED' ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-red-50 border-red-100 text-red-600"
+          )}>
+            {result.status === 'PASSED' ? <Trophy className="w-14 h-14" /> : <AlertCircle className="w-14 h-14" />}
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-4xl font-black text-[#111] tracking-tight">
+              {result.status === 'PASSED' ? "CONGRATULATIONS!" : "KEEP PRACTICING!"}
+            </h2>
+            <p className="text-sm text-gray-400 font-bold uppercase tracking-[0.3em]">
+              {result.status === 'PASSED' ? "You have mastered this module" : "Review the lectures and try again"}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-8 max-w-lg mx-auto">
+            <div className="p-8 bg-gray-50 rounded-[2rem] border border-gray-100 shadow-sm">
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-3 tracking-widest">Final Score</p>
+              <p className={cn("text-5xl font-black", result.status === 'PASSED' ? "text-emerald-600" : "text-red-600")}>
+                {Math.round(result.percentage)}%
+              </p>
+            </div>
+            <div className="p-8 bg-gray-50 rounded-[2rem] border border-gray-100 shadow-sm">
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-3 tracking-widest">Status</p>
+              <p className={cn("text-3xl font-black", result.status === 'PASSED' ? "text-emerald-600" : "text-red-600")}>
+                {result.status}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-center gap-6 pt-6">
+            <Button
+              onClick={() => router.push('/dashboard')}
+              className="bg-[#111] hover:bg-black text-white h-16 px-12 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl"
+            >
+              RETURN TO DASHBOARD
+            </Button>
+            {result.status !== 'PASSED' && (
+              <Button
+                variant="outline"
+                onClick={() => window.location.reload()}
+                className="border-gray-200 text-gray-500 h-16 px-12 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-50 transition-all"
+              >
+                <RotateCcw className="w-5 h-5 mr-3" /> RETRY ASSESSMENT
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

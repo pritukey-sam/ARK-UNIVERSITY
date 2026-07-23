@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { validateEmail, validateEmailField, validateName, validateCourseName, validateNumericRange } from '@/lib/validation';
 
 export default function SACompaniesPage() {
   const [companies, setCompanies] = useState<any[]>([]);
@@ -19,25 +20,143 @@ export default function SACompaniesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<any>(null);
   const [newCompany, setNewCompany] = useState({ name: '', plan_type: 'free', plan_price: 0, admin_name: '', admin_email: '', admin_password: '', expiry_date: '' });
+  
+  // Real-time validation errors
+  const [companyNameError, setCompanyNameError] = useState('');
+  const [adminNameError, setAdminNameError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [priceError, setPriceError] = useState('');
+  
+  // For Edit Form
+  const [editCompanyNameError, setEditCompanyNameError] = useState('');
+  const [editPriceError, setEditPriceError] = useState('');
 
   const fetchCompanies = async () => {
     try { setCompanies(await api.superAdmin.getCompanies()); }
     catch { toast.error('Failed to load companies'); }
     finally { setLoading(false); }
   };
+  
   useEffect(() => { fetchCompanies(); }, []);
 
+  useEffect(() => {
+    if (!isDialogOpen) {
+      setEmailError('');
+      setCompanyNameError('');
+      setAdminNameError('');
+      setPriceError('');
+      setPasswordError('');
+    }
+  }, [isDialogOpen]);
+
+  useEffect(() => {
+    if (!editingCompany) {
+      setEditCompanyNameError('');
+      setEditPriceError('');
+    }
+  }, [editingCompany]);
+
+  const handleNewCompanyNameChange = (val: string) => {
+    setNewCompany(prev => ({ ...prev, name: val }));
+    const check = validateCourseName(val);
+    setCompanyNameError(check.isValid ? '' : (check.error || 'Invalid company name'));
+  };
+
+  const handleNewAdminNameChange = (val: string) => {
+    setNewCompany(prev => ({ ...prev, admin_name: val }));
+    const check = validateName(val);
+    setAdminNameError(check.isValid ? '' : (check.error || 'Invalid admin name'));
+  };
+
+  const handleNewAdminEmailChange = (val: string) => {
+    setNewCompany(prev => ({ ...prev, admin_email: val }));
+    const check = validateEmailField(val);
+    setEmailError(check.isValid ? '' : (check.error || 'Invalid email address'));
+  };
+
+  const handleNewPasswordChange = (val: string) => {
+    setNewCompany(prev => ({ ...prev, admin_password: val }));
+    if (!val) {
+      setPasswordError("Password is required");
+    } else if (val.length < 8) {
+      setPasswordError("Password must be at least 8 characters long");
+    } else {
+      setPasswordError('');
+    }
+  };
+
+  const handleNewPriceChange = (val: string) => {
+    const num = Number(val);
+    setNewCompany(prev => ({ ...prev, plan_price: num }));
+    const check = validateNumericRange(num, 0, 1000000, 'Price');
+    setPriceError(check.isValid ? '' : (check.error || 'Invalid price'));
+  };
+
+  const handleEditCompanyNameChange = (val: string) => {
+    setEditingCompany((prev: any) => ({ ...prev, name: val }));
+    const check = validateCourseName(val);
+    setEditCompanyNameError(check.isValid ? '' : (check.error || 'Invalid company name'));
+  };
+
+  const handleEditPriceChange = (val: string) => {
+    const num = Number(val);
+    setEditingCompany((prev: any) => ({ ...prev, plan_price: num }));
+    const check = validateNumericRange(num, 0, 1000000, 'Price');
+    setEditPriceError(check.isValid ? '' : (check.error || 'Invalid price'));
+  };
+
   const handleCreate = async () => {
+    const compCheck = validateCourseName(newCompany.name);
+    if (!compCheck.isValid) {
+      setCompanyNameError(compCheck.error || "Invalid company name");
+      return toast.error(compCheck.error || "Invalid company name");
+    }
+    const adminCheck = validateName(newCompany.admin_name);
+    if (!adminCheck.isValid) {
+      setAdminNameError(adminCheck.error || "Invalid admin name");
+      return toast.error(adminCheck.error || "Invalid admin name");
+    }
+    const emailCheck = validateEmailField(newCompany.admin_email);
+    if (!emailCheck.isValid) {
+      setEmailError(emailCheck.error || "Invalid email");
+      return toast.error(emailCheck.error || "Invalid email");
+    }
+    if (newCompany.admin_password.length < 8) {
+      setPasswordError("Password must be at least 8 characters long");
+      return toast.error("Password must be at least 8 characters long");
+    }
+    if (newCompany.plan_type === 'paid') {
+      const priceCheck = validateNumericRange(newCompany.plan_price, 0, 1000000, 'Price');
+      if (!priceCheck.isValid) {
+        setPriceError(priceCheck.error || "Invalid price");
+        return toast.error(priceCheck.error || "Invalid price");
+      }
+    }
+
     try {
       await api.superAdmin.createCompany(newCompany);
       toast.success('Company added successfully');
       setIsDialogOpen(false);
       setNewCompany({ name: '', plan_type: 'free', plan_price: 0, admin_name: '', admin_email: '', admin_password: '', expiry_date: '' });
+      setEmailError('');
       fetchCompanies();
     } catch (e: any) { toast.error(e.message || 'Failed to add company'); }
   };
 
   const handleUpdate = async () => {
+    if (!editingCompany) return;
+    const compCheck = validateCourseName(editingCompany.name);
+    if (!compCheck.isValid) {
+      setEditCompanyNameError(compCheck.error || "Invalid company name");
+      return toast.error(compCheck.error || "Invalid company name");
+    }
+    const priceCheck = validateNumericRange(editingCompany.plan_price, 0, 1000000, 'Price');
+    if (!priceCheck.isValid) {
+      setEditPriceError(priceCheck.error || "Invalid price");
+      return toast.error(priceCheck.error || "Invalid price");
+    }
+
     try {
       await api.superAdmin.updateCompany(editingCompany.id, {
         name: editingCompany.name, plan_type: editingCompany.plan_type,
@@ -91,7 +210,16 @@ export default function SACompaniesPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Company Name</Label>
-                  <Input value={newCompany.name} onChange={e => setNewCompany({...newCompany, name: e.target.value})} placeholder="Acme Corp" />
+                  <Input 
+                    value={newCompany.name} 
+                    onChange={e => handleNewCompanyNameChange(e.target.value)} 
+                    onBlur={e => handleNewCompanyNameChange(e.target.value)}
+                    className={cn(companyNameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                    placeholder="Acme Corp" 
+                  />
+                  {companyNameError && (
+                    <p className="text-red-500 text-xs font-bold">{companyNameError}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Subscription Plan</Label>
@@ -106,7 +234,16 @@ export default function SACompaniesPage() {
                 {newCompany.plan_type === 'paid' && (
                   <div className="space-y-2">
                     <Label>Price (₹/month)</Label>
-                    <Input type="number" value={newCompany.plan_price} onChange={e => setNewCompany({...newCompany, plan_price: Number(e.target.value)})} />
+                    <Input 
+                      type="number" 
+                      value={newCompany.plan_price} 
+                      onChange={e => handleNewPriceChange(e.target.value)} 
+                      onBlur={e => handleNewPriceChange(e.target.value)}
+                      className={cn(priceError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                    />
+                    {priceError && (
+                      <p className="text-red-500 text-xs font-bold">{priceError}</p>
+                    )}
                   </div>
                 )}
                 <div className="space-y-2">
@@ -117,21 +254,50 @@ export default function SACompaniesPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Admin Name</Label>
-                  <Input value={newCompany.admin_name} onChange={e => setNewCompany({...newCompany, admin_name: e.target.value})} placeholder="John Admin" />
+                  <Input 
+                    value={newCompany.admin_name} 
+                    onChange={e => handleNewAdminNameChange(e.target.value)} 
+                    onBlur={e => handleNewAdminNameChange(e.target.value)}
+                    className={cn(adminNameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                    placeholder="John Admin" 
+                  />
+                  {adminNameError && (
+                    <p className="text-red-500 text-xs font-bold">{adminNameError}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Admin Email</Label>
-                  <Input type="email" value={newCompany.admin_email} onChange={e => setNewCompany({...newCompany, admin_email: e.target.value})} placeholder="admin@acme.com" />
+                  <Input 
+                    type="email" 
+                    value={newCompany.admin_email} 
+                    onChange={e => handleNewAdminEmailChange(e.target.value)} 
+                    onBlur={e => handleNewAdminEmailChange(e.target.value)}
+                    className={cn(emailError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                    placeholder="admin@acme.com" 
+                  />
+                  {emailError && (
+                    <p className="text-red-500 text-xs font-bold">{emailError}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Admin Password</Label>
-                  <Input type="password" value={newCompany.admin_password} onChange={e => setNewCompany({...newCompany, admin_password: e.target.value})} placeholder="••••••••" />
+                  <Input 
+                    type="password" 
+                    value={newCompany.admin_password} 
+                    onChange={e => handleNewPasswordChange(e.target.value)} 
+                    onBlur={e => handleNewPasswordChange(e.target.value)}
+                    className={cn(passwordError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                    placeholder="••••••••" 
+                  />
+                  {passwordError && (
+                    <p className="text-red-500 text-xs font-bold">{passwordError}</p>
+                  )}
                 </div>
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} className="bg-[#F26522] hover:bg-[#D54D10] text-white">Create Company</Button>
+              <Button onClick={handleCreate} disabled={!!emailError || !!companyNameError || !!adminNameError || !!passwordError || !!priceError} className="bg-[#F26522] hover:bg-[#D54D10] text-white disabled:opacity-50 disabled:cursor-not-allowed">Create Company</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -247,7 +413,15 @@ export default function SACompaniesPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Company Name</Label>
-              <Input value={editingCompany?.name || ''} onChange={e => setEditingCompany({...editingCompany, name: e.target.value})} />
+              <Input 
+                value={editingCompany?.name || ''} 
+                onChange={e => handleEditCompanyNameChange(e.target.value)} 
+                onBlur={e => handleEditCompanyNameChange(e.target.value)}
+                className={cn(editCompanyNameError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+              />
+              {editCompanyNameError && (
+                <p className="text-red-500 text-xs font-bold">{editCompanyNameError}</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -262,7 +436,16 @@ export default function SACompaniesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Monthly Price (₹)</Label>
-                <Input type="number" value={editingCompany?.plan_price || 0} onChange={e => setEditingCompany({...editingCompany, plan_price: Number(e.target.value)})} />
+                <Input 
+                  type="number" 
+                  value={editingCompany?.plan_price || 0} 
+                  onChange={e => handleEditPriceChange(e.target.value)} 
+                  onBlur={e => handleEditPriceChange(e.target.value)}
+                  className={cn(editPriceError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+                />
+                {editPriceError && (
+                  <p className="text-red-500 text-xs font-bold">{editPriceError}</p>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -284,7 +467,7 @@ export default function SACompaniesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingCompany(null)}>Cancel</Button>
-            <Button onClick={handleUpdate} className="bg-[#F26522] hover:bg-[#D54D10] text-white">Save Changes</Button>
+            <Button onClick={handleUpdate} disabled={!!editCompanyNameError || !!editPriceError} className="bg-[#F26522] hover:bg-[#D54D10] text-white disabled:opacity-50 disabled:cursor-not-allowed">Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

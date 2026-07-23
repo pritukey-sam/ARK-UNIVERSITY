@@ -15,16 +15,118 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { 
+  Dialog, DialogContent, DialogDescription, DialogFooter, 
+  DialogHeader, DialogTitle 
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
+} from "@/components/ui/select";
+import { validateEmailField, validateName, validateDesignation, validateEmployeeId } from '@/lib/validation';
 
 export default function UserDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { user: currentUser } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Edit User modal states
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    role: 'employee',
+    department: 'Engineering',
+    designation: '',
+    employee_id: ''
+  });
+  const [emailError, setEmailError] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [designationError, setDesignationError] = useState('');
+  const [employeeIdError, setEmployeeIdError] = useState('');
+
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
+  useEffect(() => {
+    if (!isEditModalOpen) {
+      setEmailError('');
+      setNameError('');
+      setDesignationError('');
+      setEmployeeIdError('');
+    }
+  }, [isEditModalOpen]);
+
+  const handleEmailChange = (val: string) => {
+    setFormData(prev => ({ ...prev, email: val }));
+    const check = validateEmailField(val);
+    setEmailError(check.isValid ? '' : (check.error || 'Invalid email address'));
+  };
+
+  const handleNameChange = (val: string) => {
+    setFormData(prev => ({ ...prev, name: val }));
+    const check = validateName(val);
+    setNameError(check.isValid ? '' : (check.error || 'Invalid name'));
+  };
+
+  const handleDesignationChange = (val: string) => {
+    setFormData(prev => ({ ...prev, designation: val }));
+    const check = validateDesignation(val);
+    setDesignationError(check.isValid ? '' : (check.error || 'Invalid designation'));
+  };
+
+  const handleEmployeeIdChange = (val: string) => {
+    const clean = val.replace(/\s+/g, "");
+    setFormData(prev => ({ ...prev, employee_id: clean }));
+    const check = validateEmployeeId(clean);
+    setEmployeeIdError(check.isValid ? '' : (check.error || 'Invalid employee ID'));
+  };
 
   useEffect(() => {
     fetchUserDetails();
   }, [id]);
+
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const nameCheck = validateName(formData.name);
+    const emailCheck = validateEmailField(formData.email);
+    const designationCheck = validateDesignation(formData.designation);
+    const empIdCheck = validateEmployeeId(formData.employee_id);
+
+    if (!nameCheck.isValid) {
+      setNameError(nameCheck.error || "Invalid name");
+      return toast.error(nameCheck.error || "Invalid name");
+    }
+    if (!emailCheck.isValid) {
+      setEmailError(emailCheck.error || "Invalid email");
+      return toast.error(emailCheck.error || "Invalid email");
+    }
+    if (!designationCheck.isValid) {
+      setDesignationError(designationCheck.error || "Invalid designation");
+      return toast.error(designationCheck.error || "Invalid designation");
+    }
+    if (!empIdCheck.isValid) {
+      setEmployeeIdError(empIdCheck.error || "Invalid employee ID");
+      return toast.error(empIdCheck.error || "Invalid employee ID");
+    }
+
+    try {
+      setSubmitting(true);
+      await api.admin.updateUser(data.user.id, formData);
+      toast.success("User profile updated");
+      setIsEditModalOpen(false);
+      fetchUserDetails();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update user");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const fetchUserDetails = async () => {
     try {
@@ -102,7 +204,27 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {isAdmin && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setFormData({
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    department: user.department || 'Engineering',
+                    designation: user.designation || '',
+                    employee_id: user.employee_id || ''
+                  });
+                  setEmailError('');
+                  setIsEditModalOpen(true);
+                }}
+                className="border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 font-bold h-9 px-4 rounded-xl transition-all shadow-sm flex items-center gap-2 text-xs"
+              >
+                Edit User
+              </Button>
+            )}
             <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100/50">
               <Shield className="w-3 h-3" />
               <span className="text-[10px] font-bold uppercase tracking-tight">Verified Identity</span>
@@ -118,8 +240,12 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
             {/* Avatar Section */}
             <div className="relative shrink-0">
-              <div className="w-20 h-20 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center text-gray-400 text-2xl font-bold shadow-sm transition-transform group-hover:scale-105 duration-300">
-                {user.avatar_initials || user.name[0]}
+              <div className="w-20 h-20 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center text-gray-400 text-2xl font-bold shadow-sm transition-transform group-hover:scale-105 duration-300 overflow-hidden">
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  user.avatar_initials || user.name[0]
+                )}
               </div>
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-lg border border-gray-200 flex items-center justify-center shadow-sm">
                 <Activity className="w-3 h-3 text-emerald-500" />
@@ -294,6 +420,76 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       </div>
+
+      {/* Edit User Modal */}
+      {isAdmin && (
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+          <DialogContent className="bg-white sm:max-w-md rounded-2xl border border-gray-100 shadow-2xl p-6 md:p-8 [&>button]:rounded-full [&>button]:hover:bg-gray-100 [&>button]:transition-colors">
+            <DialogHeader className="space-y-1.5">
+              <DialogTitle className="text-xl font-bold text-gray-900 tracking-tight">Edit Profile</DialogTitle>
+              <DialogDescription className="text-sm text-gray-500 mt-1">Update administrative details for this user.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleEditUser} className="space-y-4 pt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Full Name</Label>
+                  <Input value={formData.name} onChange={e => handleNameChange(e.target.value)} onBlur={e => handleNameChange(e.target.value)} className={cn("border-gray-200 h-11 rounded-xl px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200", nameError && "border-red-500 focus-visible:ring-red-500")} required />
+                  {nameError && <p className="text-red-500 text-xs font-bold mt-1">{nameError}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Email Address</Label>
+                  <Input 
+                    type="email" 
+                    value={formData.email} 
+                    onChange={e => handleEmailChange(e.target.value)} 
+                    onBlur={e => handleEmailChange(e.target.value)}
+                    className={cn(
+                      "border-gray-200 h-11 rounded-xl px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200",
+                      emailError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500"
+                    )}
+                    required
+                  />
+                  {emailError && <p className="text-red-500 text-xs font-bold mt-1">{emailError}</p>}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Designation <span className="text-red-500">*</span></Label>
+                <Input value={formData.designation} onChange={e => handleDesignationChange(e.target.value)} onBlur={e => handleDesignationChange(e.target.value)} placeholder="e.g. AI Engineer" className={cn("border-gray-200 h-11 rounded-xl px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200", designationError && "border-red-500 focus-visible:ring-red-500")} required />
+                {designationError && <p className="text-red-500 text-xs font-bold mt-1">{designationError}</p>}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Employee ID</Label>
+                <Input 
+                  value={formData.employee_id || ""} 
+                  onChange={e => handleEmployeeIdChange(e.target.value)} 
+                  onBlur={e => handleEmployeeIdChange(e.target.value)} 
+                  placeholder="ARK016" 
+                  className={cn("border-gray-200 h-11 rounded-xl px-4 focus-visible:ring-1 focus-visible:ring-[#F26522] focus-visible:border-transparent hover:border-gray-300 transition-all duration-200 font-mono", employeeIdError && "border-red-500 focus-visible:ring-red-500")} 
+                />
+                {employeeIdError && <p className="text-red-500 text-xs font-bold mt-1">{employeeIdError}</p>}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Role <span className="text-red-500">*</span></Label>
+                <Select value={formData.role} onValueChange={v => setFormData({...formData, role: v as string})}>
+                  <SelectTrigger className="border-gray-200 h-11 rounded-xl px-4 focus:ring-1 focus:ring-[#F26522] hover:border-gray-300 transition-all">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white rounded-xl border-gray-150 shadow-xl">
+                    <SelectItem value="employee" className="cursor-pointer">employee</SelectItem>
+                    <SelectItem value="hr" className="cursor-pointer">hr</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="submit" disabled={submitting || !!emailError || !!nameError || !!designationError || !!employeeIdError} className="w-full bg-[#F26522] hover:bg-[#D54D10] text-white font-bold h-12 mt-4 rounded-xl shadow-md shadow-orange-100 hover:shadow-lg hover:shadow-orange-200/50 active:scale-[0.99] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                {submitting ? 'Saving Changes...' : 'Update Profile'}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

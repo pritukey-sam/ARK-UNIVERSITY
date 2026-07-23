@@ -8,13 +8,14 @@ import {
   LayoutDashboard, BookOpen, Users, Settings, 
   LogOut, Bell, Search, Menu, X,
   User, ChevronDown, Building2, Activity,
-  PanelLeftClose, PanelLeftOpen, FileText
+  PanelLeftClose, PanelLeftOpen, FileText, History, Bookmark
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import OnboardingTour from './OnboardingTour';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -44,7 +45,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (savedState) setIsCollapsed(savedState === 'true');
 
     let interval: any;
-    if (user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'hr') {
+    if (user && (user.role === 'super_admin' || user.role === 'admin' || user.role === 'hr')) {
       fetchNotifications();
       interval = setInterval(fetchNotifications, 30000); // Poll every 30s
     }
@@ -68,6 +69,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   };
 
   const fetchNotifications = async () => {
+    if (!user) {
+      return;
+    }
     try {
       const data = await api.notifications.getAll();
       setNotifications(data);
@@ -106,9 +110,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     finally { setSearchLoading(false); }
   };
 
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
     toast.success('Logged out successfully');
   };
 
@@ -118,7 +122,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { label: 'Courses', icon: BookOpen, path: '/courses', roles: ['admin', 'employee', 'hr'] },
     { label: 'Companies', icon: Building2, path: '/super-admin/companies', roles: ['super_admin'] },
     { label: 'Users', icon: Users, path: '/users', roles: ['admin', 'hr'] },
-    { label: 'Assign Courses', icon: FileText, path: '/assignments', roles: ['hr', 'admin'] },
+    { label: 'Assigned Courses', icon: FileText, path: '/assignments', roles: ['hr', 'admin'] },
+    { label: 'Course Requests', icon: Bookmark, path: '/course-requests', roles: ['admin'] },
+    { label: 'Audit Log', icon: History, path: '/audit-log', roles: ['admin'] },
     { label: 'Settings', icon: Settings, path: '/profile', roles: ['super_admin', 'admin', 'employee', 'hr'] },
   ];
 
@@ -128,20 +134,29 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-white overflow-hidden">
       {/* Sidebar - Desktop */}
       <aside className={cn(
-        "hidden lg:flex flex-col border-r border-[#eee] bg-white transition-all duration-300 ease-in-out h-full",
+        "hidden lg:flex flex-col border-r border-[rgba(255,255,255,0.1)] bg-[#2D3250] transition-all duration-300 ease-in-out h-full",
         isCollapsed ? "w-20" : "w-64"
       )}>
-        <div className={cn("p-6 border-b border-[#eee] flex items-center transition-all duration-300", isCollapsed ? "flex-col gap-4 justify-center px-4" : "justify-between")}>
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 rounded bg-[#F26522] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-lg">L</span>
-            </div>
-            {!isCollapsed && <span className="text-xl font-bold text-[#111] whitespace-nowrap">Lumina LMS</span>}
+        <div className={cn("p-6 border-b border-[rgba(255,255,255,0.1)] flex items-center transition-all duration-300", isCollapsed ? "flex-col gap-4 justify-center px-4" : "justify-between")}>
+          <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0 mr-2">
+            <img 
+              src="/ark-simplify-logo.png" 
+              alt="ARK Simplify Logo" 
+              className="h-[36px] w-auto object-contain shrink-0" 
+            />
+            {!isCollapsed && (
+              <div className="marquee-container whitespace-nowrap">
+                <div className="animate-marquee whitespace-nowrap">
+                  <span className="text-xl font-bold text-white pr-4 whitespace-nowrap shrink-0">ARK University</span>
+                  <span className="text-xl font-bold text-white pr-4 whitespace-nowrap shrink-0">ARK University</span>
+                </div>
+              </div>
+            )}
           </div>
           <Button 
             variant="ghost" 
             size="icon" 
-            className="text-[#6A6F73] hover:text-[#111]" 
+            className="text-white/60 hover:text-white hover:bg-[#3D4F8A]" 
             onClick={toggleSidebar}
           >
             {isCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
@@ -152,12 +167,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Link
               key={item.path}
               href={item.path}
+              id={`tour-sidebar-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
               title={isCollapsed ? item.label : ""}
               className={cn(
                 "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
                 pathname === item.path 
-                  ? "bg-[#F26522]/10 text-[#F26522]" 
-                  : "text-[#6A6F73] hover:bg-gray-50 hover:text-[#111]",
+                  ? "bg-[#F26522] text-white font-semibold animate-in fade-in duration-200" 
+                  : "text-white/90 hover:bg-[#3D4F8A] hover:text-white",
                 isCollapsed && "justify-center px-2"
               )}
             >
@@ -166,11 +182,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="p-4 border-t border-[#eee]">
+        <div className="p-4 border-t border-[rgba(255,255,255,0.1)]">
           <button 
             onClick={handleLogout}
             className={cn(
-              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors",
+              "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-white/90 hover:bg-[#3D4F8A] hover:text-white transition-colors",
               isCollapsed && "justify-center px-2"
             )}
             title={isCollapsed ? "Sign Out" : ""}
@@ -194,13 +210,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </Button>
                 }
               />
-              <SheetContent side="left" className="p-0 w-64">
-                <div className="p-6 border-b border-[#eee]">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded bg-[#F26522] flex items-center justify-center">
-                      <span className="text-white font-bold text-lg">L</span>
+              <SheetContent side="left" className="p-0 w-64 bg-[#2D3250] border-r border-[rgba(255,255,255,0.1)] text-white [&>button]:text-white [&>button]:hover:bg-[#3D4F8A]">
+                <div className="p-6 border-b border-[rgba(255,255,255,0.1)]">
+                  <div className="flex items-center gap-3 w-full overflow-hidden">
+                    <img 
+                      src="/ark-simplify-logo.png" 
+                      alt="ARK Simplify Logo" 
+                      className="h-[36px] w-auto object-contain shrink-0" 
+                    />
+                    <div className="marquee-container whitespace-nowrap">
+                      <div className="animate-marquee whitespace-nowrap">
+                        <span className="text-xl font-bold text-white pr-4 whitespace-nowrap shrink-0">ARK University</span>
+                        <span className="text-xl font-bold text-white pr-4 whitespace-nowrap shrink-0">ARK University</span>
+                      </div>
                     </div>
-                    <span className="text-xl font-bold text-[#111]">Lumina LMS</span>
                   </div>
                 </div>
                 <nav className="p-4 space-y-1">
@@ -211,8 +234,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       className={cn(
                         "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
                         pathname === item.path 
-                          ? "bg-[#F26522]/10 text-[#F26522]" 
-                          : "text-[#6A6F73] hover:bg-gray-50 hover:text-[#111]"
+                          ? "bg-[#F26522] text-white font-semibold" 
+                          : "text-white/90 hover:bg-[#3D4F8A] hover:text-white"
                       )}
                     >
                       <item.icon className="w-5 h-5" />
@@ -221,7 +244,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   ))}
                   <button 
                     onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors mt-4 pt-4 border-t border-[#eee]"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-white/90 hover:bg-[#3D4F8A] hover:text-white transition-colors mt-4 pt-4 border-t border-[rgba(255,255,255,0.1)]"
                   >
                     <LogOut className="w-5 h-5" />
                     <span>Sign Out</span>
@@ -303,8 +326,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                                 onClick={() => { router.push(`/users/${u.id}`); setSearchOpen(false); setSearchQuery(''); }}
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-[#F26522]/5 rounded-lg transition-colors flex items-start gap-3"
                               >
-                                <div className="w-7 h-7 rounded-full bg-[#F26522]/10 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
-                                  {u.name?.[0]?.toUpperCase() || '?'}
+                                <div className="w-7 h-7 rounded-full bg-[#F26522]/10 text-[#F26522] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 overflow-hidden">
+                                  {u.avatar_url ? (
+                                    <img src={u.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                  ) : (
+                                    u.name?.[0]?.toUpperCase() || '?'
+                                  )}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
@@ -373,8 +400,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
             <div className="relative" ref={profileRef}>
               <button onClick={() => setProfileOpen(!profileOpen)} className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-[#F26522] flex items-center justify-center text-white text-xs font-bold">
-                  {user?.name?.[0]?.toUpperCase()}
+                <div className="w-8 h-8 rounded-full bg-[#F26522] flex items-center justify-center text-white text-xs font-bold overflow-hidden">
+                  {user?.avatar_url ? (
+                    <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    user?.name?.[0]?.toUpperCase() || 'A'
+                  )}
                 </div>
                 <ChevronDown className={cn("w-4 h-4 text-[#6A6F73] transition-transform", profileOpen && "rotate-180")} />
               </button>
@@ -393,6 +424,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      <OnboardingTour />
     </div>
   );
 }

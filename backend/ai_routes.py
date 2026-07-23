@@ -1,8 +1,12 @@
 import os
 from dotenv import load_dotenv
-load_dotenv()
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(dotenv_path=env_path)
+
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from validation import validate_and_log_upload
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
@@ -107,7 +111,7 @@ async def ask_ai(req: AskRequest, db: Session = Depends(get_db), current_user=De
     content = get_module_content(req.module_id, db, current_user.get("company_id"))
     
     prompt = f"""
-You are Lumina AI, a helpful learning assistant for an LMS platform called Lumina.
+You are ARK University AI, a helpful learning assistant for an LMS platform called ARK University.
 
 The platform has modules, each containing:
 - Videos: tutorial lessons
@@ -247,7 +251,8 @@ Content:
         raise HTTPException(status_code=500, detail="AI failed to generate quiz structure.")
 
 @router.post("/evaluate")
-async def evaluate_submission(assignment_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr"]))):
+async def evaluate_submission(assignment_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(require_roles(["admin", "hr"]))):
+    validate_and_log_upload(file, "document", db, request, current_user, "ai_evaluation", allow_archives=True)
     company_id = current_user.get("company_id")
     # This expects the submitted file and the assignment context.
     # Usually we would unzip and read files, but here we'll just read file names for context

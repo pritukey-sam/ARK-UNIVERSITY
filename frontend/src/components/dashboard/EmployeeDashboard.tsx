@@ -17,6 +17,8 @@ export default function EmployeeDashboard() {
   const { user } = useAuth();
   const [courses, setCourses] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
+  const [modulesMap, setModulesMap] = useState<Record<number, string>>({});
+  const [activityPage, setActivityPage] = useState(1);
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -37,6 +39,20 @@ export default function EmployeeDashboard() {
       setCourses(coursesData);
       setActivity(activityData);
       setAnalytics(analyticsData);
+
+      // Fetch modules for all assigned courses to build the ID-to-title map
+      const maps: Record<number, string> = {};
+      await Promise.all(coursesData.map(async (course: any) => {
+        try {
+          const courseModules = await api.common.getModulesByCourse(course.id);
+          courseModules.forEach((m: any) => {
+            maps[m.id] = m.title;
+          });
+        } catch (err) {
+          console.error(`Failed to load modules for course ${course.id}`, err);
+        }
+      }));
+      setModulesMap(maps);
     } catch (error) { 
       console.error(error); 
     } finally { 
@@ -49,6 +65,79 @@ export default function EmployeeDashboard() {
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? 'Recently' : date.toLocaleString();
   };
+
+  // Filter, format, and deduplicate activity feed for personal "My Learning Activity" timeline
+  const processedActivities = React.useMemo(() => {
+    if (!activity || activity.length === 0) return [];
+
+    // 1. Filter only logs related to current user
+    const personalActivity = activity.filter(item => {
+      if (!item.message) return false;
+      const prefix = `${user?.name}:`;
+      const prefixAlt = `${user?.name} `;
+      return item.message.startsWith(prefix) || item.message.startsWith(prefixAlt);
+    });
+
+    // 2. Format logs and replace module IDs with actual module titles
+    const formattedActivities = personalActivity.map(item => {
+      let rawMessage = item.message;
+      const prefix = `${user?.name}:`;
+      const prefixAlt = `${user?.name} `;
+      let details = rawMessage;
+      
+      // Strip user name prefix to make it feel like "My Learning Activity"
+      if (rawMessage.startsWith(prefix)) {
+        details = rawMessage.slice(prefix.length).trim();
+      } else if (rawMessage.startsWith(prefixAlt)) {
+        details = rawMessage.slice(prefixAlt.length).trim();
+      }
+
+      // Find occurrences of module ID and replace with titles
+      const regex = /module ID:\s*(\d+)/i;
+      const match = details.match(regex);
+      if (match) {
+        const moduleId = parseInt(match[1]);
+        const moduleName = modulesMap[moduleId] || `Module #${moduleId}`;
+        
+        if (details.includes('Watched all videos')) {
+          details = `Completed all videos in “${moduleName}”`;
+        } else if (details.includes('Successfully finished all requirements')) {
+          details = `Successfully finished all requirements for “${moduleName}”`;
+        } else if (details.includes('Uploaded assignment')) {
+          details = `Uploaded assignment for “${moduleName}”`;
+        } else if (details.includes('Uploaded solution')) {
+          details = `Uploaded solution for “${moduleName}”`;
+        } else if (details.includes('Completed reading material')) {
+          details = `Completed reading material in “${moduleName}”`;
+        } else {
+          details = details.replace(/module ID:\s*\d+/i, `“${moduleName}”`);
+        }
+      }
+
+      return {
+        ...item,
+        formattedMessage: details
+      };
+    });
+
+    // 3. Deduplicate matching logs to keep ONLY the latest entry
+    const uniqueActivities: any[] = [];
+    const seenMessages = new Set<string>();
+    formattedActivities.forEach(item => {
+      if (!seenMessages.has(item.formattedMessage)) {
+        seenMessages.add(item.formattedMessage);
+        uniqueActivities.push(item);
+      }
+    });
+
+    return uniqueActivities;
+  }, [activity, modulesMap, user]);
+
+  const totalActivities = processedActivities.length;
+  const activitiesPerPage = 5;
+  const totalPages = Math.ceil(totalActivities / activitiesPerPage);
+  const startIndex = (activityPage - 1) * activitiesPerPage;
+  const currentActivities = processedActivities.slice(startIndex, startIndex + activitiesPerPage);
 
   const stats = {
     total: courses.length,
@@ -67,7 +156,7 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="p-8 space-y-8 bg-white min-h-screen">
-      <div className="bg-white p-8 rounded-xl border border-[#eee] shadow-sm">
+      <div id="tour-dashboard-overview" className="bg-white p-8 rounded-xl border border-[#eee] shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="space-y-2">
             <h1 className="text-3xl font-bold text-[#111]">Welcome back, {user?.name}!</h1>
@@ -91,7 +180,7 @@ export default function EmployeeDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
+        <div id="tour-dashboard-assigned-courses" className="lg:col-span-2 space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-[#111]">Continue Learning</h2>
             <Link href="/courses">
@@ -103,7 +192,7 @@ export default function EmployeeDashboard() {
 
           {courses.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {courses.map((course) => {
+              {courses.map((course, index) => {
                 const progress = course.status === 'completed' ? 100 : 
                   course.total_modules > 0 ? Math.round((course.completed_modules / course.total_modules) * 100) : 0;
                 
@@ -144,7 +233,7 @@ export default function EmployeeDashboard() {
                         </div>
 
                         <div className="mt-6 space-y-4">
-                          <div className="space-y-2">
+                          <div className="space-y-2" id={index === 0 ? "tour-course-progress" : undefined}>
                             <div className="flex justify-between items-end">
                               <div className="space-y-1">
                                 <p className="text-[10px] font-bold text-[#6A6F73] uppercase tracking-wider">Course Progress</p>
@@ -193,13 +282,13 @@ export default function EmployeeDashboard() {
 
         {/* Activity Sidebar */}
         <div className="space-y-8">
-          <Card className="p-6 bg-white border border-[#eee] shadow-sm">
+          <Card id="tour-dashboard-recent-activity" className="p-6 bg-white border border-[#eee] shadow-sm">
             <CardHeader className="p-0 mb-6 flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Recent Activity</CardTitle>
               <Activity className="w-5 h-5 text-[#F26522]" />
             </CardHeader>
             <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-              {activity.length > 0 ? activity.map((item, i) => (
+              {currentActivities.length > 0 ? currentActivities.map((item, i) => (
                 <div key={i} className="flex items-start gap-4 p-4 border border-[#eee] rounded-xl hover:bg-gray-50 transition-colors">
                   <div className="mt-1">
                     {item.type === 'quiz_attempt' ? <Trophy className="w-4 h-4 text-orange-500" /> : 
@@ -207,7 +296,7 @@ export default function EmployeeDashboard() {
                      <BookOpen className="w-4 h-4 text-green-500" />}
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-[#111]">{item.message}</p>
+                    <p className="text-sm font-bold text-[#111]">{item.formattedMessage}</p>
                     <p className="text-xs text-[#6A6F73] mt-1">{formatDate(item.time)}</p>
                   </div>
                 </div>
@@ -215,6 +304,39 @@ export default function EmployeeDashboard() {
                 <div className="text-center py-10 text-[#6A6F73] text-sm">No recent activity</div>
               )}
             </div>
+            {totalActivities > activitiesPerPage && (
+              <div className="flex items-center justify-between pt-4 border-t border-[#eee] mt-4">
+                {activityPage > 1 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setActivityPage(prev => Math.max(1, prev - 1))}
+                    className="text-xs font-bold text-[#6A6F73] hover:text-[#F26522] hover:bg-orange-50"
+                  >
+                    ← Previous
+                  </Button>
+                ) : (
+                  <div className="w-[80px]" />
+                )}
+                
+                <span className="text-xs text-[#6A6F73] font-bold">
+                  Page {activityPage} of {totalPages}
+                </span>
+
+                {activityPage < totalPages ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setActivityPage(prev => Math.min(totalPages, prev + 1))}
+                    className="text-xs font-bold text-[#6A6F73] hover:text-[#F26522] hover:bg-orange-50"
+                  >
+                    Next →
+                  </Button>
+                ) : (
+                  <div className="w-[80px]" />
+                )}
+              </div>
+            )}
           </Card>
 
           <Card className="p-6 bg-white border border-[#eee] shadow-sm">

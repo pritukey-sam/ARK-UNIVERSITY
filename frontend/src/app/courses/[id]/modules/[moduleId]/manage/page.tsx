@@ -16,6 +16,7 @@ import DeleteConfirmDialog from '@/components/common/DeleteConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { cn, formatDuration, parseDuration } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
+import { validateCourseName, validateDescription, validateURL, validateNumericRange } from '@/lib/validation';
 import {
  Dialog,
  DialogContent,
@@ -64,8 +65,61 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  const [taskFile, setTaskFile] = useState<File | null>(null);
  const [uploadingTask, setUploadingTask] = useState(false);
 
- const [quizFile, setQuizFile] = useState<File | null>(null);
- const [uploadingQuiz, setUploadingQuiz] = useState(false);
+  const [quizFile, setQuizFile] = useState<File | null>(null);
+  const [uploadingQuiz, setUploadingQuiz] = useState(false);
+  const [quizDuration, setQuizDuration] = useState<number>(20);
+
+  // Real-time validation errors
+  const [moduleTitleError, setModuleTitleError] = useState('');
+  const [videoTitleError, setVideoTitleError] = useState('');
+  const [videoDescriptionError, setVideoDescriptionError] = useState('');
+  const [externalVideoUrlError, setExternalVideoUrlError] = useState('');
+  const [videoDurationError, setVideoDurationError] = useState('');
+  const [taskTitleError, setTaskTitleError] = useState('');
+
+  const handleModuleTitleChange = (val: string) => {
+    setModuleTitle(val);
+    const check = validateCourseName(val);
+    setModuleTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
+
+  const handleVideoTitleChange = (val: string) => {
+    setVideoTitle(val);
+    const check = validateCourseName(val);
+    setVideoTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
+
+  const handleVideoDescriptionChange = (val: string) => {
+    setVideoDescription(val);
+    const check = validateDescription(val, false);
+    setVideoDescriptionError(check.isValid ? '' : (check.error || 'Invalid description'));
+  };
+
+  const handleExternalVideoUrlChange = (val: string) => {
+    setExternalVideoUrl(val);
+    const check = validateURL(val, false);
+    setExternalVideoUrlError(check.isValid ? '' : (check.error || 'Invalid URL'));
+  };
+
+  const handleVideoDurationChange = (val: string) => {
+    setVideoDuration(val);
+    if (val && val.trim()) {
+      const seconds = parseDuration(val);
+      if (seconds <= 0 || isNaN(seconds)) {
+        setVideoDurationError("Invalid duration format (e.g. 15 or 1:30)");
+      } else {
+        setVideoDurationError('');
+      }
+    } else {
+      setVideoDurationError('');
+    }
+  };
+
+  const handleTaskTitleChange = (val: string) => {
+    setTaskTitle(val);
+    const check = validateCourseName(val);
+    setTaskTitleError(check.isValid ? '' : (check.error || 'Invalid title'));
+  };
 
  useEffect(() => {
  fetchData();
@@ -145,143 +199,181 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  }
  };
 
- const handleUpdateModule = async () => {
- if (!isEditing) {
- setIsEditing(true);
- return;
- }
- try {
- setIsSaving(true);
- await api.admin.updateModule(moduleId, { 
- title: moduleTitle
- });
- toast.success('Module updated');
- setIsEditing(false);
- fetchData();
- } catch (e: any) {
- toast.error(e.message || 'Failed to update module');
- } finally {
- setIsSaving(false);
- }
- };
+  const handleUpdateModule = async () => {
+  if (!isEditing) {
+  setIsEditing(true);
+  return;
+  }
+  const check = validateCourseName(moduleTitle);
+  if (!check.isValid) {
+    setModuleTitleError(check.error || 'Invalid title');
+    return toast.error(check.error || 'Invalid title');
+  }
+  try {
+  setIsSaving(true);
+  await api.admin.updateModule(moduleId, { 
+  title: moduleTitle
+  });
+  toast.success('Module updated');
+  setIsEditing(false);
+  fetchData();
+  } catch (e: any) {
+  toast.error(e.message || 'Failed to update module');
+  } finally {
+  setIsSaving(false);
+  }
+  };
 
- const handleAddModule = async (title: string, description: string) => {
- try {
- const orderIndex = course?.modules?.length + 1 || 1;
- const newMod = await api.admin.createModule(courseId, { 
- title, 
- order_index: orderIndex 
- });
- toast.success('Module created');
- router.push(`/courses/${courseId}/modules/${newMod.id}/manage`);
- } catch (e: any) {
- toast.error(e.message || 'Failed to create module');
- }
- };
+  const handleAddModule = async (title: string, description: string) => {
+  try {
+  const orderIndex = course?.modules?.length + 1 || 1;
+  const newMod = await api.admin.createModule(courseId, { 
+  title, 
+  order_index: orderIndex 
+  });
+  toast.success('Module created');
+  router.push(`/courses/${courseId}/modules/${newMod.id}/manage`);
+  } catch (e: any) {
+  toast.error(e.message || 'Failed to create module');
+  }
+  };
 
- const handleDeleteModule = async (id: number) => {
- try {
- await api.admin.deleteModule(id);
- toast.success('Module deleted');
- if (id === moduleId) {
- router.push(`/courses/${courseId}`);
- } else {
- fetchData();
- }
- } catch (e: any) {
- toast.error(e.message || 'Delete failed');
- }
- };
+  const handleDeleteModule = async (id: number) => {
+  try {
+  await api.admin.deleteModule(id);
+  toast.success('Module deleted');
+  if (id === moduleId) {
+  router.push(`/courses/${courseId}`);
+  } else {
+  fetchData();
+  }
+  } catch (e: any) {
+  toast.error(e.message || 'Delete failed');
+  }
+  };
 
- const handleDeleteItem = async (type: string, id: number) => {
- try {
- if (type === 'video') await api.admin.deleteVideo(id);
- if (type === 'notes') await api.admin.deleteNotes(id);
- if (type === 'assignment') await api.admin.deleteAssignment(id);
- if (type === 'quiz') await api.admin.deleteQuiz(id);
- toast.success('Item deleted');
- fetchData();
- } catch (e: any) {
- toast.error(e.message || 'Delete failed');
- }
- };
+  const handleDeleteItem = async (type: string, id: number) => {
+  try {
+  if (type === 'video') await api.admin.deleteVideo(id);
+  if (type === 'notes') await api.admin.deleteNotes(id);
+  if (type === 'assignment') await api.admin.deleteAssignment(id);
+  if (type === 'quiz') await api.admin.deleteQuiz(id);
+  toast.success('Item deleted');
+  fetchData();
+  } catch (e: any) {
+  toast.error(e.message || 'Delete failed');
+  }
+  };
 
- const handleUploadVideo = async () => {
- if (!videoTitle) return;
- try {
- setUploadingVideo(true);
- let finalUrl = '';
- 
- if (videoMode === 'upload') {
- if (!videoFile) return;
- const formData = new FormData();
- formData.append('video', videoFile);
- const uploadRes = await api.admin.uploadVideo(formData);
- finalUrl = uploadRes.video_url;
- } else {
- if (!externalVideoUrl) {
- toast.error("Please enter a valid URL");
- setUploadingVideo(false);
- return;
- }
- finalUrl = externalVideoUrl;
- }
+  const handleUploadVideo = async () => {
+  const tCheck = validateCourseName(videoTitle);
+  if (!tCheck.isValid) {
+    setVideoTitleError(tCheck.error || 'Invalid title');
+    return toast.error(tCheck.error || 'Invalid title');
+  }
+  const dCheck = validateDescription(videoDescription, false);
+  if (!dCheck.isValid) {
+    setVideoDescriptionError(dCheck.error || 'Invalid description');
+    return toast.error(dCheck.error || 'Invalid description');
+  }
+  if (videoMode === 'link') {
+    const uCheck = validateURL(externalVideoUrl, true);
+    if (!uCheck.isValid) {
+      setExternalVideoUrlError(uCheck.error || 'Invalid URL');
+      return toast.error(uCheck.error || 'Invalid URL');
+    }
+  }
+  if (videoDuration.trim()) {
+    const seconds = parseDuration(videoDuration);
+    if (seconds <= 0 || isNaN(seconds)) {
+      setVideoDurationError("Invalid duration format (e.g. 15 or 1:30)");
+      return toast.error("Invalid duration format (e.g. 15 or 1:30)");
+    }
+  }
+  try {
+  setUploadingVideo(true);
+  let finalUrl = '';
+  
+  if (videoMode === 'upload') {
+  if (!videoFile) return;
+  const formData = new FormData();
+  formData.append('video', videoFile);
+  const uploadRes = await api.admin.uploadVideo(formData);
+  finalUrl = uploadRes.video_url;
+  } else {
+  if (!externalVideoUrl) {
+  toast.error("Please enter a valid URL");
+  setUploadingVideo(false);
+  return;
+  }
+  finalUrl = externalVideoUrl;
+  }
 
- await api.admin.addVideo(moduleId, { 
- title: videoTitle, 
- video_url: finalUrl, 
- duration_seconds: parseDuration(videoDuration),
- description: videoDescription
- });
- toast.success('Video added');
- setVideoFile(null);
- setExternalVideoUrl('');
- setVideoTitle('');
- setVideoDuration('');
- setVideoDescription('');
- fetchData();
- } catch (e: any) {
- toast.error(e.message);
- } finally {
- setUploadingVideo(false);
- }
- };
+  await api.admin.addVideo(moduleId, { 
+  title: videoTitle, 
+  video_url: finalUrl, 
+  duration_seconds: parseDuration(videoDuration),
+  description: videoDescription
+  });
+  toast.success('Video added');
+  setVideoFile(null);
+  setExternalVideoUrl('');
+  setVideoTitle('');
+  setVideoDuration('');
+  setVideoDescription('');
+  setVideoTitleError('');
+  setVideoDescriptionError('');
+  setExternalVideoUrlError('');
+  setVideoDurationError('');
+  fetchData();
+  } catch (e: any) {
+  toast.error(e.message);
+  } finally {
+  setUploadingVideo(false);
+  }
+  };
 
- const handleUploadNotes = async () => {
- if (!notesFile) return;
- try {
- setUploadingNotes(true);
- const formData = new FormData();
- formData.append('file', notesFile);
- await api.admin.addNotes(moduleId, formData);
- toast.success('Notes uploaded');
- setNotesFile(null);
- fetchData();
- } catch (e: any) {
- toast.error(e.message);
- } finally {
- setUploadingNotes(false);
- }
- };
+  const handleUploadNotes = async () => {
+  if (!notesFile) return;
+  try {
+  setUploadingNotes(true);
+  const formData = new FormData();
+  formData.append('file', notesFile);
+  await api.admin.addNotes(moduleId, formData);
+  toast.success('Notes uploaded');
+  setNotesFile(null);
+  fetchData();
+  } catch (e: any) {
+  toast.error(e.message);
+  } finally {
+  setUploadingNotes(false);
+  }
+  };
 
- const handleUploadTask = async () => {
- if (!taskFile || !taskTitle) return;
- try {
- setUploadingTask(true);
- const formData = new FormData();
- formData.append('file', taskFile);
- formData.append('title', taskTitle);
- await api.admin.addAssignment(moduleId, formData);
- toast.success('Task created');
- setTaskFile(null);
- setTaskTitle('');
- fetchData();
- } catch (e: any) {
- toast.error(e.message);
- } finally {
- setUploadingTask(false);
- }
- };
+  const handleUploadTask = async () => {
+  const tCheck = validateCourseName(taskTitle);
+  if (!tCheck.isValid) {
+    setTaskTitleError(tCheck.error || 'Invalid title');
+    return toast.error(tCheck.error || 'Invalid title');
+  }
+  if (!taskFile || !taskTitle) return;
+  try {
+  setUploadingTask(true);
+  const formData = new FormData();
+  formData.append('file', taskFile);
+  formData.append('title', taskTitle);
+  await api.admin.addAssignment(moduleId, formData);
+  toast.success('Task created');
+  setTaskFile(null);
+  setTaskTitle('');
+  setTaskTitleError('');
+  fetchData();
+  } catch (e: any) {
+  toast.error(e.message);
+  } finally {
+  setUploadingTask(false);
+  }
+  };
 
  const handleUploadQuizBulk = async () => {
  if (!quizFile) return;
@@ -296,7 +388,10 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  setUploadingQuiz(false);
  return;
  }
- await api.admin.bulkQuizConfirm(moduleId, { questions: validQuestions });
+  await api.admin.bulkQuizConfirm(moduleId, { 
+    questions: validQuestions,
+    time_limit: Math.max(1, Math.min(180, quizDuration || 20))
+  });
  toast.success('Quiz imported successfully');
  setQuizFile(null);
  fetchData();
@@ -371,12 +466,18 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <div className="space-y-1.5">
  <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">Module Title</Label>
  {isEditing ? (
- <Input 
- value={moduleTitle} 
- onChange={(e) => setModuleTitle(e.target.value)} 
- className="text-lg font-semibold border-gray-200 focus:ring-[#F26522]/10 h-11 px-4 rounded-xl transition-all"
- placeholder="Enter module title..."
- />
+ <div className="space-y-1.5 w-full">
+   <Input 
+   value={moduleTitle} 
+   onChange={(e) => handleModuleTitleChange(e.target.value)} 
+   onBlur={(e) => handleModuleTitleChange(e.target.value)} 
+   className={cn("text-lg font-semibold border-gray-200 focus:ring-[#F26522]/10 h-11 px-4 rounded-xl transition-all", moduleTitleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+   placeholder="Enter module title..."
+   />
+   {moduleTitleError && (
+     <p className="text-red-500 text-xs font-bold">{moduleTitleError}</p>
+   )}
+ </div>
  ) : (
  <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{moduleTitle}</h1>
  )}
@@ -394,11 +495,11 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
 
  <Button 
  onClick={handleUpdateModule} 
- disabled={isSaving}
+ disabled={isSaving || (isEditing && !!moduleTitleError)}
  className={cn(
  "flex-1 sm:w-32 h-11 rounded-xl font-bold transition-all shadow-sm",
  isEditing 
- ? "bg-[#F26522] hover:bg-[#D54D10] text-white" 
+ ? "bg-[#F26522] hover:bg-[#D54D10] text-white disabled:opacity-50 disabled:cursor-not-allowed" 
  : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
  )}
  >
@@ -479,67 +580,88 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  </div>
  </div>
 
- <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
- <div className="space-y-1.5">
- <Label className="text-xs text-gray-600">Video Title</Label>
- <Input value={videoTitle} onChange={e=>setVideoTitle(e.target.value)} className="h-9 text-sm" placeholder="e.g. Introduction" />
- </div>
- <div className="space-y-1.5">
- <Label className="text-xs text-gray-600">Duration (e.g. 15, 1:30, 1:20:30)</Label>
- <div className="relative">
- <Input 
- type="text" 
- value={videoDuration} 
- onChange={e=>setVideoDuration(e.target.value)} 
- className="h-9 text-sm pr-20" 
- placeholder="e.g. 15 or 1:30" 
- />
- {isFetchingDuration && (
- <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs text-orange-500 font-bold bg-white px-1">
- <Loader2 className="w-3 h-3 animate-spin" />
- <span className="animate-pulse">FETCHING...</span>
- </div>
- )}
- </div>
- </div>
-
- <div className="sm:col-span-2 space-y-1.5">
- <Label className="text-xs text-gray-600">Video Description</Label>
- <Textarea 
- value={videoDescription} 
- onChange={e=>setVideoDescription(e.target.value)} 
- className="min-h-[80px] text-sm" 
- placeholder="Briefly explain what happens in this lesson..." 
- />
- </div>
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+  <div className="space-y-1.5">
+  <Label className="text-xs text-gray-600">Video Title</Label>
+  <Input 
+    value={videoTitle} 
+    onChange={e=>handleVideoTitleChange(e.target.value)} 
+    onBlur={e=>handleVideoTitleChange(e.target.value)}
+    className={cn("h-9 text-sm", videoTitleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+    placeholder="e.g. Introduction" 
+  />
+  {videoTitleError && (
+    <p className="text-red-500 text-xs font-bold">{videoTitleError}</p>
+  )}
+  </div>
+  <div className="space-y-1.5">
+  <Label className="text-xs text-gray-600">Duration (e.g. 15, 1:30, 1:20:30)</Label>
+  <div className="relative">
+  <Input 
+  type="text" 
+  value={videoDuration} 
+  onChange={e=>handleVideoDurationChange(e.target.value)} 
+  onBlur={e=>handleVideoDurationChange(e.target.value)}
+  className={cn("h-9 text-sm pr-20", videoDurationError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")} 
+  placeholder="e.g. 15 or 1:30" 
+  />
+  {isFetchingDuration && (
+  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs text-orange-500 font-bold bg-white px-1">
+  <Loader2 className="w-3 h-3 animate-spin" />
+  <span className="animate-pulse">FETCHING...</span>
+  </div>
+  )}
+  </div>
+  {videoDurationError && (
+    <p className="text-red-500 text-xs font-bold">{videoDurationError}</p>
+  )}
+  </div>
  
- <div className="sm:col-span-2 mt-1">
- {videoMode === 'upload' ? (
- <div className="flex gap-3 items-center">
- <Input type="file" accept="video/mp4" onChange={e => setVideoFile(e.target.files?.[0] || null)} className="h-9 text-sm flex-1" />
- <Button onClick={handleUploadVideo} disabled={!videoFile || !videoTitle || uploadingVideo} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white min-w-[100px]">
- {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Upload"}
- </Button>
- </div>
- ) : (
- <div className="flex gap-3 items-start">
- <div className="flex-1 space-y-1.5">
- <Input 
- type="url" 
- value={externalVideoUrl} 
- onChange={e => setExternalVideoUrl(e.target.value)} 
- className="h-9 text-sm w-full" 
- placeholder="Paste YouTube, Vimeo, or direct video URL" 
- />
- </div>
- <Button onClick={handleUploadVideo} disabled={!externalVideoUrl || !videoTitle || uploadingVideo} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white min-w-[100px]">
- {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Save Link"}
- </Button>
- </div>
- )}
- </div>
- </div>
- </div>
+  <div className="sm:col-span-2 space-y-1.5">
+  <Label className="text-xs text-gray-600">Video Description</Label>
+  <Textarea 
+  value={videoDescription} 
+  onChange={e=>handleVideoDescriptionChange(e.target.value)} 
+  onBlur={e=>handleVideoDescriptionChange(e.target.value)}
+  className={cn("min-h-[80px] text-sm", videoDescriptionError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")} 
+  placeholder="Briefly explain what happens in this lesson..." 
+  />
+  {videoDescriptionError && (
+    <p className="text-red-500 text-xs font-bold">{videoDescriptionError}</p>
+  )}
+  </div>
+  
+  <div className="sm:col-span-2 mt-1">
+  {videoMode === 'upload' ? (
+  <div className="flex gap-3 items-center">
+  <Input type="file" accept="video/mp4" onChange={e => setVideoFile(e.target.files?.[0] || null)} className="h-9 text-sm flex-1" />
+  <Button onClick={handleUploadVideo} disabled={!videoFile || !videoTitle || uploadingVideo || !!videoTitleError || !!videoDescriptionError || !!videoDurationError} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white min-w-[100px] disabled:opacity-50 disabled:cursor-not-allowed">
+  {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Upload"}
+  </Button>
+  </div>
+  ) : (
+  <div className="flex gap-3 items-start">
+  <div className="flex-1 space-y-1.5">
+  <Input 
+  type="url" 
+  value={externalVideoUrl} 
+  onChange={e => handleExternalVideoUrlChange(e.target.value)} 
+  onBlur={e => handleExternalVideoUrlChange(e.target.value)} 
+  className={cn("h-9 text-sm w-full", externalVideoUrlError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")} 
+  placeholder="Paste YouTube, Vimeo, or direct video URL" 
+  />
+  {externalVideoUrlError && (
+    <p className="text-red-500 text-xs font-bold">{externalVideoUrlError}</p>
+  )}
+  </div>
+  <Button onClick={handleUploadVideo} disabled={!externalVideoUrl || !videoTitle || uploadingVideo || !!videoTitleError || !!videoDescriptionError || !!videoDurationError || !!externalVideoUrlError} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white min-w-[100px] disabled:opacity-50 disabled:cursor-not-allowed">
+  {uploadingVideo ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Save Link"}
+  </Button>
+  </div>
+  )}
+  </div>
+  </div>
+  </div>
 
  {moduleData.videos?.length > 0 && (
  <div className="space-y-3 pt-6 border-t border-gray-100">
@@ -558,9 +680,18 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  </div>
  <div className="flex items-center gap-1">
  <EditVideoDialog video={v} onUpdated={fetchData} />
- <Button variant="ghost" size="sm" onClick={() => handleDeleteItem('video', v.id)} className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
- <Trash2 className="w-4 h-4" />
- </Button>
+ <DeleteConfirmDialog
+    title="Delete Video"
+    description="Are you sure you want to delete this video? This action cannot be undone."
+    onConfirm={async () => {
+      await handleDeleteItem('video', v.id);
+    }}
+    trigger={
+      <Button variant="ghost" size="sm" className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    }
+  />
  </div>
  </div>
  ))}
@@ -599,9 +730,18 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <a href={n.file_url} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-blue-600">
  <ExternalLink className="w-4 h-4" />
  </a>
- <Button variant="ghost" size="sm" onClick={() => handleDeleteItem('notes', n.id)} className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
- <Trash2 className="w-4 h-4" />
- </Button>
+ <DeleteConfirmDialog
+    title="Delete Notes"
+    description="Are you sure you want to delete this document? This action cannot be undone."
+    onConfirm={async () => {
+      await handleDeleteItem('notes', n.id);
+    }}
+    trigger={
+      <Button variant="ghost" size="sm" className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    }
+  />
  </div>
  </div>
  ))}
@@ -619,11 +759,20 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <div className="space-y-4">
  <div className="space-y-1.5">
  <Label className="text-xs text-gray-600">Task Title</Label>
- <Input value={taskTitle} onChange={e=>setTaskTitle(e.target.value)} className="h-9 text-sm" placeholder="e.g. Final Project Submission" />
+ <Input 
+   value={taskTitle} 
+   onChange={e=>handleTaskTitleChange(e.target.value)} 
+   onBlur={e=>handleTaskTitleChange(e.target.value)}
+   className={cn("h-9 text-sm", taskTitleError && "border-red-500 focus-visible:ring-red-500 focus-visible:border-red-500 hover:border-red-500")}
+   placeholder="e.g. Final Project Submission" 
+ />
+ {taskTitleError && (
+   <p className="text-red-500 text-xs font-bold">{taskTitleError}</p>
+ )}
  </div>
  <div className="space-y-1.5 flex gap-3 items-center">
  <Input type="file" onChange={e => setTaskFile(e.target.files?.[0] || null)} className="h-9 text-sm flex-1" />
- <Button onClick={handleUploadTask} disabled={!taskFile || !taskTitle || uploadingTask} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white px-6">
+ <Button onClick={handleUploadTask} disabled={!taskFile || !taskTitle || uploadingTask || !!taskTitleError} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white px-6 disabled:opacity-50 disabled:cursor-not-allowed">
  {uploadingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create"}
  </Button>
  </div>
@@ -646,9 +795,18 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <a href={a.file_url} target="_blank" rel="noreferrer" className="p-2 text-gray-400 hover:text-emerald-600">
  <ExternalLink className="w-4 h-4" />
  </a>
- <Button variant="ghost" size="sm" onClick={() => handleDeleteItem('assignment', a.id)} className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
- <Trash2 className="w-4 h-4" />
- </Button>
+ <DeleteConfirmDialog
+    title="Delete Task"
+    description="Are you sure you want to delete this task? This action cannot be undone."
+    onConfirm={async () => {
+      await handleDeleteItem('assignment', a.id);
+    }}
+    trigger={
+      <Button variant="ghost" size="sm" className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    }
+  />
  </div>
  </div>
  ))}
@@ -665,8 +823,7 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <h3 className="text-base font-semibold text-gray-900">Manage Quizzes</h3>
  <Button variant="outline" size="sm" className="h-8 text-xs border-gray-300 text-gray-600" onClick={async () => {
  try {
- const token = localStorage.getItem('token');
- const response = await fetch('/api/quizzes/sample-template', { headers: { 'Authorization': `Bearer ${token}` } });
+ const response = await fetch('/api/quizzes/sample-template', { credentials: 'include' });
  const blob = await response.blob();
  const url = window.URL.createObjectURL(blob);
  const a = document.createElement('a');
@@ -679,12 +836,29 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  </Button>
  </div>
 
- <div className="flex items-center gap-3">
- <Input type="file" accept=".xlsx,.xls,.csv" onChange={e => setQuizFile(e.target.files?.[0] || null)} className="h-9 text-sm flex-1" />
- <Button onClick={handleUploadQuizBulk} disabled={!quizFile || uploadingQuiz} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white px-6">
- {uploadingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import Quiz"}
- </Button>
- </div>
+  <div className="space-y-4">
+    <div className="space-y-1.5 max-w-xs">
+      <Label className="text-xs text-gray-600">Quiz Duration (Minutes)</Label>
+      <Input 
+        type="number"
+        min={1}
+        max={180}
+        value={quizDuration}
+        onChange={e => {
+          const val = parseInt(e.target.value);
+          setQuizDuration(isNaN(val) ? 20 : val);
+        }}
+        className="h-9 text-sm"
+        placeholder="e.g. 20"
+      />
+    </div>
+    <div className="flex items-center gap-3">
+      <Input type="file" accept=".xlsx,.xls,.csv" onChange={e => setQuizFile(e.target.files?.[0] || null)} className="h-9 text-sm flex-1" />
+      <Button onClick={handleUploadQuizBulk} disabled={!quizFile || uploadingQuiz} className="h-9 bg-[#F26522] hover:bg-[#D54D10] text-white px-6">
+        {uploadingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import Quiz"}
+      </Button>
+    </div>
+  </div>
 
  {moduleData.quizzes?.length > 0 && (
  <div className="space-y-3 pt-6 border-t border-gray-100">
@@ -701,9 +875,18 @@ export default function ManageModulePage({ params }: { params: Promise<{ id: str
  <p className="text-xs text-gray-500">{q.question_count || 0} questions</p>
  </div>
  </div>
- <Button variant="ghost" size="sm" onClick={() => handleDeleteItem('quiz', q.id)} className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
- <Trash2 className="w-4 h-4" />
- </Button>
+ <DeleteConfirmDialog
+    title="Delete Quiz"
+    description="Are you sure you want to delete this quiz? This action cannot be undone."
+    onConfirm={async () => {
+      await handleDeleteItem('quiz', q.id);
+    }}
+    trigger={
+      <Button variant="ghost" size="sm" className="text-gray-400 hover:text-red-600 h-8 w-8 p-0">
+        <Trash2 className="w-4 h-4" />
+      </Button>
+    }
+  />
  </div>
  ))}
  </div>

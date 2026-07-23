@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from database import create_tables
-from routers import courses, progress, assignments, super_admin, dashboard, user, registration, payment, upload, notifications
+from routers import courses, progress, assignments, super_admin, dashboard, user, registration, payment, upload, notifications, course_access
 import routes
 import ai_routes
 
@@ -19,8 +19,8 @@ class CustomStaticFiles(StaticFiles):
         return response
 
 app = FastAPI(
-    title="Lumina LMS API",
-    description="Backend API for Lumina Learning Management System",
+    title="ARK University LMS API",
+    description="Backend API for ARK University Learning Management System",
     version="2.0.0"
 )
 
@@ -36,6 +36,65 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── SECURITY HEADERS ───────────────────────────────────────────────────────
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    host = request.url.hostname or ""
+    is_development = (
+        os.getenv("ENV", "development").lower() == "development" or
+        host == "localhost" or
+        host == "127.0.0.1" or
+        host.startswith("192.168.") or
+        host.startswith("10.")
+    )
+    
+    response = await call_next(request)
+    
+    # 1. Clickjacking prevention
+    response.headers["X-Frame-Options"] = "DENY"
+    
+    # 2. MIME sniffing prevention
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    # 3. Referrer Policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+    # 4. Content Security Policy
+    if is_development:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://f.vimeocdn.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: https://pub-15434e9e4db6402892098a597dc510ea.r2.dev; "
+            "media-src 'self' blob: https://pub-15434e9e4db6402892098a597dc510ea.r2.dev; "
+            "frame-src 'self' https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com; "
+            "connect-src 'self' ws: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://fonts.googleapis.com; "
+            "object-src 'none'; "
+            "frame-ancestors 'none';"
+        )
+    else:
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://f.vimeocdn.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: https://pub-15434e9e4db6402892098a597dc510ea.r2.dev; "
+            "media-src 'self' blob: https://pub-15434e9e4db6402892098a597dc510ea.r2.dev; "
+            "frame-src 'self' https://www.youtube.com https://youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://vimeo.com; "
+            "connect-src 'self' https://fonts.googleapis.com; "
+            "object-src 'none'; "
+            "frame-ancestors 'none';"
+        )
+    response.headers["Content-Security-Policy"] = csp
+    
+    # 5. Permissions Policy
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=()"
+    )
+    
+    return response
 
 # ── STATIC FILES ───────────────────────────────────────────────────────────
 if not os.path.exists("uploads"):
@@ -55,6 +114,7 @@ app.include_router(routes.router, prefix="/api")
 app.include_router(ai_routes.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
+app.include_router(course_access.router, prefix="/api")
 
 # Serve uploaded files locally
 if not os.path.exists("uploads"):
@@ -64,14 +124,16 @@ app.mount("/uploads", CustomStaticFiles(directory="uploads"), name="uploads")
 # ── STARTUP ────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
-    print("Lumina LMS API started - User router included")
+    print("ARK University LMS API started - User router included")
+    from services.email_service import verify_and_log_smtp_config
+    verify_and_log_smtp_config()
     create_tables()
-    print("Lumina LMS API started - tables checked")
+    print("ARK University LMS API started - tables checked")
 
 # ── HEALTH CHECK ───────────────────────────────────────────────────────────
 @app.get("/")
 def root():
-    return {"status": "ok", "app": "Lumina LMS API v2.0"}
+    return {"status": "ok", "app": "ARK University LMS API v2.0"}
 
 @app.get("/health")
 def health():

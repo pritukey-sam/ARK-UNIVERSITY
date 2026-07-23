@@ -13,13 +13,11 @@ export default function LandingPage() {
  {/* Navbar */}
  <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
  <div className="flex items-center gap-2">
- <div className="w-10 h-10 rounded-lg bg-[#F26522] flex items-center justify-center">
- <span className="text-white font-bold text-xl">L</span>
- </div>
- <span className="text-2xl font-bold text-[#111]">Lumina LMS</span>
+ <img src="/ark-simplify-logo.png" className="w-9 h-9 object-contain" alt="ARK Simplify Logo" />
+ <span className="text-2xl font-bold text-[#111]">ARK University</span>
  </div>
  <div className="flex items-center gap-6">
- <Link href="/login" className="text-sm font-medium text-[#6A6F73] hover:text-[#111]">Login</Link>
+ <a href="/login" className="text-sm font-medium text-[#6A6F73] hover:text-[#111]">Login</a>
  </div>
  </nav>
 
@@ -27,7 +25,7 @@ export default function LandingPage() {
  <main className="max-w-7xl mx-auto px-8 pt-20 pb-32">
  <div className="grid lg:grid-cols-2 gap-12 items-center">
  <div className="space-y-8">
- <h1 className="text-6xl font-bold text-[#111] leading-tight">
+ <h1 className="text-6xl font-bold text-[#2D3250] leading-tight">
  Empower your workforce with <span className="text-[#F26522]">smart learning.</span>
  </h1>
  <p className="text-xl text-[#6A6F73] max-w-lg">
@@ -48,7 +46,7 @@ export default function LandingPage() {
  >
  <Image 
  src="/hero-illustration.png"
- alt="Lumina LMS Learning Experience"
+ alt="ARK University Learning Experience"
  fill
  className="object-cover"
  priority
@@ -102,11 +100,11 @@ export default function LandingPage() {
  <footer className="max-w-7xl mx-auto px-8 py-12 border-t border-[#eee] flex justify-between items-center text-sm text-[#6A6F73]">
  <div className="flex items-center gap-2">
  <div className="w-6 h-6 rounded bg-[#F26522] flex items-center justify-center">
- <span className="text-white font-bold text-xs">L</span>
+ <span className="text-white font-bold text-xs">A</span>
  </div>
- <span className="font-bold text-[#111]">Lumina LMS</span>
+ <span className="font-bold text-[#111]">ARK University</span>
  </div>
- <p>© 2026 Lumina LMS. All rights reserved.</p>
+ <p>© 2026 ARK University. All rights reserved.</p>
  <div className="flex gap-6">
  <Link href="#" className="hover:text-[#111]">Privacy Policy</Link>
  <Link href="#" className="hover:text-[#111]">Terms of Service</Link>

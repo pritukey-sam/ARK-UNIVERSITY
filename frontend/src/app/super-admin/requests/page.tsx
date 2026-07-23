@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
  Table,
@@ -30,12 +31,13 @@ import {
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import { useAuth } from '@/context/AuthContext';
+import { validateNumericRange } from '@/lib/validation';
 
 function Guard({ children }: { children: React.ReactNode }) {
  const { user, loading } = useAuth();
  const router = useRouter();
  useEffect(() => {
- if (!loading && (!user || user.role !== 'super_admin')) router.push('/login');
+ if (!loading && (!user || user.role !== 'super_admin')) router.replace('/login');
  }, [user, loading, router]);
  if (loading || !user || user.role !== 'super_admin') {
  return <div className="min-h-screen bg-[#080810] flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#7C3AED]" /></div>;
@@ -67,6 +69,7 @@ function PurchaseRequestsContent() {
  const [search, setSearch] = useState('');
  const [processingId, setProcessingId] = useState<number | null>(null);
  const [overrides, setOverrides] = useState<Record<number, { plan_type: string, plan_price: number }>>({});
+ const [priceErrors, setPriceErrors] = useState<Record<number, string>>({});
 
  useEffect(() => {
  fetchRequests();
@@ -77,12 +80,15 @@ function PurchaseRequestsContent() {
  setLoading(true);
  const data = await api.superAdmin.getRegistrationRequests();
  setRequests(data);
- // Initialize overrides
+ // Initialize overrides & errors
  const initialOverrides: any = {};
+ const initialErrors: any = {};
  data.forEach((r: any) => {
  initialOverrides[r.id] = { plan_type: r.plan_type, plan_price: 0 };
+ initialErrors[r.id] = '';
  });
  setOverrides(initialOverrides);
+ setPriceErrors(initialErrors);
  } catch (error) {
  toast.error('Failed to fetch registration requests');
  } finally {
@@ -100,11 +106,37 @@ function PurchaseRequestsContent() {
  }));
  };
 
+ const handlePlanTypeOverrideChange = (id: number, type: string) => {
+  updateOverride(id, 'plan_type', type);
+  if (type === 'free') {
+    updateOverride(id, 'plan_price', 0);
+    setPriceErrors(prev => ({ ...prev, [id]: '' }));
+  }
+};
+
+const handlePriceOverrideChange = (id: number, valStr: string) => {
+  const parsed = parseFloat(valStr);
+  const finalVal = isNaN(parsed) ? 0 : parsed;
+  updateOverride(id, 'plan_price', finalVal);
+  const check = validateNumericRange(finalVal, 0, 1000000, 'Price');
+  setPriceErrors(prev => ({
+    ...prev,
+    [id]: check.isValid ? '' : (check.error || 'Invalid price')
+  }));
+};
+
  const handleAction = async (id: number, action: 'approve' | 'reject') => {
  try {
  setProcessingId(id);
  if (action === 'approve') {
  const override = overrides[id];
+ if (override.plan_type === 'paid') {
+   const check = validateNumericRange(override.plan_price, 0, 1000000, 'Price');
+   if (!check.isValid) {
+     setPriceErrors(prev => ({ ...prev, [id]: check.error || 'Invalid price' }));
+     return toast.error(check.error || 'Invalid price');
+   }
+ }
  await api.superAdmin.approveRegistration(id, {
  plan_type: override.plan_type,
  plan_price: override.plan_price
@@ -239,32 +271,38 @@ function PurchaseRequestsContent() {
  </Badge>
  </TableCell>
  <TableCell>
- {request.status === 'pending' ? (
- <div className="space-y-2 max-w-[150px]">
- <select 
- className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
- value={override.plan_type}
- onChange={(e) => updateOverride(request.id, 'plan_type', e.target.value)}
- >
- <option value="free" className="bg-zinc-900 text-white">FREE</option>
- <option value="paid" className="bg-zinc-900 text-white">PAID</option>
- </select>
- {override.plan_type === 'paid' && (
- <div className="relative">
- <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">₹</span>
- <Input 
- type="number"
- placeholder="Amount"
- className="h-8 bg-white/5 border-white/10 pl-6 text-xs font-bold"
- value={override.plan_price || ''}
- onChange={(e) => updateOverride(request.id, 'plan_price', parseFloat(e.target.value) || 0)}
- />
- </div>
- )}
- </div>
- ) : (
- <span className="text-xs font-bold text-zinc-500 uppercase">{request.plan_type}</span>
- )}
+  {request.status === 'pending' ? (
+  <div className="space-y-2 max-w-[150px]">
+  <select 
+  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+  value={override.plan_type}
+  onChange={(e) => handlePlanTypeOverrideChange(request.id, e.target.value)}
+  >
+  <option value="free" className="bg-zinc-900 text-white">FREE</option>
+  <option value="paid" className="bg-zinc-900 text-white">PAID</option>
+  </select>
+  {override.plan_type === 'paid' && (
+  <div className="space-y-1">
+    <div className="relative">
+    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">₹</span>
+    <Input 
+    type="number"
+    placeholder="Amount"
+    className={cn("h-8 bg-white/5 pl-6 text-xs font-bold", priceErrors[request.id] ? "border-red-500 focus-visible:ring-red-500" : "border-white/10")}
+    value={override.plan_price || ''}
+    onChange={(e) => handlePriceOverrideChange(request.id, e.target.value)}
+    onBlur={(e) => handlePriceOverrideChange(request.id, e.target.value)}
+    />
+    </div>
+    {priceErrors[request.id] && (
+      <p className="text-red-500 text-[10px] font-bold">{priceErrors[request.id]}</p>
+    )}
+  </div>
+  )}
+  </div>
+  ) : (
+  <span className="text-xs font-bold text-zinc-500 uppercase">{request.plan_type}</span>
+  )}
  </TableCell>
  <TableCell>
  <div className="flex items-center gap-2">
@@ -281,7 +319,7 @@ function PurchaseRequestsContent() {
  size="sm" 
  className="bg-green-600 hover:bg-green-700 h-9 px-4 rounded-xl font-bold shadow-lg shadow-green-600/20"
  onClick={() => handleAction(request.id, 'approve')}
- disabled={processingId === request.id}
+ disabled={processingId === request.id || !!priceErrors[request.id]}
  >
  {processingId === request.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1.5" />}
  Approve & Activate

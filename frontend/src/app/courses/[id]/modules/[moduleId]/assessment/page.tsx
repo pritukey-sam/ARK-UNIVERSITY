@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Clock, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, Trophy,
@@ -29,6 +30,11 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [startTime] = useState(Date.now());
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+
+  const unansweredCount = quiz?.questions 
+    ? quiz.questions.filter((q: any) => !answers[q.id] || String(answers[q.id]).trim() === "").length 
+    : 0;
 
   // Fetch Quiz Data
   useEffect(() => {
@@ -88,8 +94,14 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
     setMarkedForReview(prev => ({ ...prev, [qId]: !prev[qId] }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!quiz || isSubmitting) return;
+    setShowSubmitModal(true);
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (!quiz || isSubmitting) return;
+    setShowSubmitModal(false);
     setIsSubmitting(true);
     
     try {
@@ -326,9 +338,9 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
   const isFillBlank = ['fill_blank', 'fill_in_blank', 'text', 'short_answer', 'fill', 'short'].includes(currentQuestion.type);
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50 font-sans select-none overflow-hidden text-slate-900">
+    <div className="h-[calc(100vh-4rem)] flex flex-col bg-slate-50 font-sans select-none overflow-hidden text-slate-900">
       {/* ── TOP NAV ────────────────────────────────────────────────────────── */}
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-50 shrink-0">
+      <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-50 shrink-0">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white">
             <LayoutGrid className="w-5 h-5" />
@@ -367,12 +379,12 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
         
         {/* LEFT: COMPACT PALETTE */}
         <aside className="w-[300px] bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden">
-           <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+           <div className="p-4 h-14 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Item Navigator</h3>
               <Badge className="bg-slate-900 text-white border-none rounded-md text-[9px] px-2">{quiz.questions.length} Total</Badge>
            </div>
            
-           <div className="flex-1 overflow-y-auto p-5 scrollbar-hide">
+           <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
               <div className="grid grid-cols-5 gap-2">
                  {quiz.questions.map((q: any, idx: number) => {
                     const isAnswered = answers[q.id] !== undefined && answers[q.id] !== "";
@@ -398,7 +410,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
               </div>
            </div>
 
-           <div className="p-5 bg-slate-50 border-t border-slate-100">
+           <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
               <div className="space-y-4">
                  <div className="space-y-2">
                     <div className="flex items-center justify-between text-[9px] font-bold text-slate-400 uppercase tracking-widest">
@@ -433,21 +445,21 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
 
         {/* RIGHT: QUESTION ENGINE */}
         <main className="flex-1 flex flex-col relative overflow-hidden bg-white">
-           <div className="flex-1 overflow-y-auto scroll-smooth">
-              <div className="max-w-3xl mx-auto px-8 pt-12 pb-24 space-y-10">
+            <div className="flex-1 overflow-y-auto scroll-smooth flex flex-col">
+               <div className="max-w-3xl w-full mx-auto px-8 py-6 space-y-6 my-auto">
                  
-                 <div className="space-y-6">
+                 <div className="space-y-3">
                     <div className="flex items-center gap-3">
                        <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-md text-[9px] font-black uppercase tracking-widest">Item {currentIdx + 1}</span>
                        <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-md text-[9px] font-black uppercase tracking-widest">{currentQuestion.marks} Points</span>
                     </div>
                     
-                    <h2 className="text-2xl font-bold text-slate-900 leading-snug tracking-tight">
+                    <h2 className="text-xl font-bold text-slate-900 leading-snug tracking-tight">
                        {currentQuestion.question_text}
                     </h2>
                  </div>
 
-                 <div className="space-y-4">
+                 <div className="space-y-3">
                     <div className="flex flex-col gap-2">
                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
                           {isFillBlank ? "Answer Input" : "Select the correct option"}
@@ -461,12 +473,12 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                             value={answers[currentQuestion.id] || ""}
                             onChange={(e) => setAnswers(prev => ({ ...prev, [currentQuestion.id]: e.target.value }))}
                             placeholder="Type your answer here..."
-                            className="h-20 px-8 rounded-2xl border-2 border-slate-100 focus:border-orange-500 focus:ring-0 text-xl font-bold bg-white transition-all shadow-md placeholder:text-slate-200 placeholder:font-medium"
+                            className="h-12 px-5 rounded-xl border-2 border-slate-100 focus:border-orange-500 focus:ring-0 text-base font-bold bg-white transition-all shadow-sm placeholder:text-slate-200 placeholder:font-medium"
                           />
-                          <p className="mt-4 text-[11px] text-slate-400 font-medium italic">Note: Ensure correct spelling and formatting for automatic scoring.</p>
+                          <p className="mt-2 text-[11px] text-slate-400 font-medium italic">Note: Ensure correct spelling and formatting for automatic scoring.</p>
                        </div>
                     ) : (
-                       <div className="grid grid-cols-1 gap-3">
+                       <div className="grid grid-cols-1 gap-2.5">
                           {options.map((opt: string, i: number) => {
                              const isSelected = answers[currentQuestion.id] === opt;
                              return (
@@ -474,7 +486,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                                  key={i}
                                  onClick={() => handleOptionSelect(opt)}
                                  className={cn(
-                                   "group flex items-center gap-4 p-5 rounded-xl border-2 text-left transition-all relative overflow-hidden",
+                                   "group flex items-center gap-4 py-2.5 px-4 rounded-xl border-2 text-left transition-all relative overflow-hidden",
                                    isSelected 
                                      ? "bg-slate-900 border-slate-900 text-white shadow-lg translate-x-1" 
                                      : "bg-white border-slate-100 hover:border-orange-200 text-slate-600 hover:bg-orange-50/30"
@@ -504,7 +516,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                  </div>
 
                  {/* Subtle Hint/Info if needed */}
-                 <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl flex items-start gap-3">
+                 <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl flex items-start gap-2.5">
                     <AlertCircle className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
                     <p className="text-[11px] text-blue-700 font-medium leading-relaxed">
                        Read all options carefully before choosing. You can change your answer any time before the final submission.
@@ -514,13 +526,13 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
            </div>
 
            {/* ── STICKY FOOTER CONTROLS ────────────────────────────────────── */}
-           <footer className="h-20 bg-white border-t border-slate-200 flex items-center justify-between px-8 z-40 shrink-0">
+           <footer className="h-14 bg-white border-t border-slate-200 flex items-center justify-between px-6 z-40 shrink-0">
               <div className="flex items-center gap-3">
                  <Button 
                    variant="outline" 
                    onClick={toggleMarkForReview}
                    className={cn(
-                     "h-11 px-5 rounded-xl font-bold text-[10px] uppercase tracking-widest gap-2 transition-all",
+                     "h-9 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest gap-2 transition-all",
                      markedForReview[currentQuestion.id] 
                        ? "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700" 
                        : "border-slate-200 text-slate-500 hover:bg-slate-50"
@@ -537,18 +549,18 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                      delete newAnswers[currentQuestion.id];
                      return newAnswers;
                    })}
-                   className="h-11 px-5 rounded-xl font-bold text-[10px] uppercase tracking-widest text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                   className="h-9 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
                  >
                    CLEAR
                  </Button>
               </div>
-
+ 
               <div className="flex items-center gap-3">
                  <Button 
                    variant="outline" 
                    disabled={currentIdx === 0}
                    onClick={() => setCurrentIdx(prev => prev - 1)}
-                   className="h-11 px-6 rounded-xl font-bold text-[10px] uppercase tracking-widest text-slate-600 border-slate-200 hover:border-slate-300"
+                   className="h-9 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest text-slate-600 border-slate-200 hover:border-slate-300"
                  >
                    <ChevronLeft className="w-4 h-4 mr-2" /> PREVIOUS
                  </Button>
@@ -561,7 +573,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                        handleSubmit();
                      }
                    }}
-                   className="bg-slate-900 hover:bg-black text-white h-12 px-8 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
+                   className="bg-slate-900 hover:bg-black text-white h-9 px-6 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2"
                  >
                    {currentIdx === quiz.questions.length - 1 ? (
                      <>SUBMIT EXAM <CheckCircle2 className="w-4 h-4" /></>
@@ -570,9 +582,56 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
                    )}
                  </Button>
               </div>
-           </footer>
-        </main>
+            </footer>
+         </main>
       </div>
+
+      <Dialog open={showSubmitModal} onOpenChange={setShowSubmitModal}>
+        <DialogContent className="max-w-md p-6 rounded-2xl border-none shadow-2xl bg-white font-sans text-slate-900" showCloseButton={false}>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center border border-orange-100 shrink-0">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <DialogHeader>
+                <DialogTitle className="text-lg font-black text-slate-900 leading-none">
+                  Submit Assessment?
+                </DialogTitle>
+              </DialogHeader>
+            </div>
+
+            <div className="space-y-3 pl-[52px]">
+              <p className="text-sm font-medium text-slate-500 leading-relaxed">
+                Are you sure you want to submit? You will not be able to change your answers after submission.
+              </p>
+              {unansweredCount > 0 && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2.5 text-red-700">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <p className="text-xs font-bold leading-relaxed">
+                    You have {unansweredCount} unanswered question{unansweredCount > 1 ? 's' : ''}.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowSubmitModal(false)}
+                className="h-10 px-5 rounded-xl font-bold text-[10px] uppercase tracking-widest text-slate-500 border-slate-200 hover:bg-slate-50 transition-all"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmSubmit}
+                className="h-10 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest bg-[#F26522] hover:bg-[#D54D10] text-white transition-all shadow-md"
+              >
+                Submit
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

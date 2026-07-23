@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, Float
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -42,6 +42,10 @@ class User(Base):
     country_code = Column(String(10), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
+    is_first_login = Column(Boolean, default=True)
+    temp_password = Column(String(255), nullable=True)
+    reset_token = Column(String(255), nullable=True)
+    reset_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -91,7 +95,7 @@ class Module(Base):
 
     course = relationship("Course", back_populates="modules")
     progress_records = relationship("UserProgress", back_populates="module", cascade="all, delete-orphan")
-    videos = relationship("Video", back_populates="module", cascade="all, delete-orphan")
+    videos = relationship("Video", order_by="Video.id", back_populates="module", cascade="all, delete-orphan")
     notes = relationship("Notes", back_populates="module", cascade="all, delete-orphan")
     assignments = relationship("Assignment", back_populates="module", cascade="all, delete-orphan")
     quizzes = relationship("Quiz", back_populates="module", cascade="all, delete-orphan")
@@ -146,6 +150,7 @@ class Quiz(Base):
     id = Column(Integer, primary_key=True, index=True)
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=False)
     title = Column(String(255), nullable=False)
+    time_limit = Column(Integer, default=20)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -321,4 +326,42 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
     user = relationship("User")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    actor_name = Column(String(100), nullable=True)
+    actor_role = Column(String(50), nullable=True)
+    action = Column(String(100), nullable=False)
+    target = Column(String(255), nullable=True)
+    details = Column(Text, nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+
+    company = relationship("Company")
+
+
+class CourseAccessRequest(Base):
+    __tablename__ = "course_access_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    status = Column(String(50), default="pending")  # pending, approved, rejected, fulfilled
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+    course = relationship("Course")
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'course_id', name='uq_user_course_request'),
+    )
+

@@ -1,11 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+from validation import validate_and_log_upload
 from sqlalchemy.orm import Session
 from database import get_db
-from auth import get_current_user, hash_password
+from auth import get_current_user, hash_password, validate_email_format
 from models import User, Company
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from schemas import UserOut
+from validation import (
+    validate_email,
+    validate_name,
+    validate_numeric_range
+)
 
 router = APIRouter(prefix="/account", tags=["User"])
 
@@ -15,6 +21,30 @@ class ProfileUpdate(BaseModel):
     phone: Optional[str] = None
     country_code: Optional[str] = None
     password: Optional[str] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_prof_name(cls, v):
+        if v is not None:
+            validate_name(v)
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_prof_email(cls, v):
+        if v is not None:
+            validate_email(v)
+        return v
+
+    @field_validator('phone')
+    @classmethod
+    def validate_prof_phone(cls, v):
+        if v is not None:
+            trimmed = v.strip()
+            if trimmed:
+                if not trimmed.isdigit() or len(trimmed) != 10:
+                    raise ValueError("Phone number must be exactly 10 digits")
+        return v
 
 @router.get("/profile")
 def get_profile(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -51,34 +81,53 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(get_current_
 
 @router.patch("/profile")
 def update_profile(body: ProfileUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    try:
+        user = db.query(User).filter(User.id == current_user["id"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        if body.name:
+            validate_name(body.name)
+            user.name = body.name
+            
+        if body.email: 
+            normalized_email = body.email.strip().lower()
+            validate_email(normalized_email)
+            existing = db.query(User).filter(User.email == normalized_email, User.id != user.id).first()
+            if existing:
+                raise ValueError("Email already in use by another account")
+            user.email = normalized_email
+            
+        if body.phone is not None:
+            phone_val = body.phone.strip()
+            if phone_val:
+                if not phone_val.isdigit() or len(phone_val) != 10:
+                    raise ValueError("Phone number must be exactly 10 digits")
+            user.phone = phone_val
+            
+        if body.country_code is not None:
+            user.country_code = body.country_code
+            
+        if body.password:
+            if len(body.password) < 8:
+                raise ValueError("Password must be at least 8 characters long")
+            user.password_hash = hash_password(body.password)
+            
+        db.commit()
+        db.refresh(user)
+        return {"message": "Profile updated successfully"}
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/avatar")
+async def upload_avatar(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     user = db.query(User).filter(User.id == current_user["id"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    if body.name: user.name = body.name
-    if body.email: 
-        normalized_email = body.email.strip().lower()
-        if not normalized_email:
-            raise HTTPException(status_code=400, detail="Email cannot be empty")
-            
-        existing = db.query(User).filter(User.email == normalized_email, User.id != user.id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already in use by another account")
-        user.email = normalized_email
-    if body.phone is not None: user.phone = body.phone
-    if body.country_code is not None: user.country_code = body.country_code
-    if body.password:
-        user.password_hash = hash_password(body.password)
-        
-    db.commit()
-    db.refresh(user)
-    return {"message": "Profile updated successfully"}
-
-@router.post("/avatar")
-async def upload_avatar(file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    user = db.query(User).filter(User.id == current_user["id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    validate_and_log_upload(file, "image", db, request, current_user, "avatar")
     
     # Save file
     import os

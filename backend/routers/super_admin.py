@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
-from database import get_db
+from database import get_db, log_audit_event
 from models import Company, User, Course, QuizAttempt, ActivityLog
-from schemas import CompanyWithAdminCreate, CompanyOut, CompanyUpdate, RegistrationApproval
-from auth import require_roles, hash_password
+from schemas import CompanyWithAdminCreate, CompanyOut, CompanyUpdate, RegistrationApproval, CompanyWithAdminCreateOut
+from auth import require_roles, hash_password, validate_email_format
 from typing import List
 from datetime import datetime, timedelta
 
@@ -86,7 +86,7 @@ def get_growth_data(db: Session = Depends(get_db), current_user=Depends(require_
         result.append({"name": month_name, "companies": companies_count, "users": users_count, "revenue": float(revenue)})
     return result
 
-@router.post("/companies")
+@router.post("/companies", response_model=CompanyWithAdminCreateOut)
 def create_company(body: CompanyWithAdminCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(["super_admin"]))):
     # Generate company code from name if not provided
     company_code = body.company_code
@@ -104,6 +104,10 @@ def create_company(body: CompanyWithAdminCreate, db: Session = Depends(get_db), 
     if existing:
         raise HTTPException(status_code=400, detail="Company code already exists")
     
+    # Check if email format is valid
+    if not validate_email_format(body.admin_email):
+        raise HTTPException(status_code=400, detail="Invalid email address format")
+        
     # Check if email exists
     existing_user = db.query(User).filter(User.email == body.admin_email).first()
     if existing_user:
@@ -171,6 +175,7 @@ def update_company(company_id: int, body: CompanyUpdate, db: Session = Depends(g
     db.refresh(company)
     
     log_activity(db, "Company Updated", company_id=company.id, details=f"Updated settings for {company.name}")
+    log_audit_event(db, "Settings Changed", current_user["id"], company.name, f"Updated settings for {company.name}", company.id)
     return {"message": "Company updated successfully", "company": company}
 
 @router.get("/registration-requests")

@@ -48,6 +48,21 @@ export const QuizPreview = ({ quiz }: QuizPreviewProps) => {
  console.error('Failed to parse options for question', q.id);
  }
 
+ let resolvedAnswer = q.correct_answer;
+ if (optionsList.length > 0) {
+ if (/^[1-4]$/.test(q.correct_answer)) {
+ const idx = parseInt(q.correct_answer) - 1;
+ if (idx >= 0 && idx < optionsList.length) {
+ resolvedAnswer = optionsList[idx];
+ }
+ } else if (/^[A-Da-d]$/.test(q.correct_answer)) {
+ const idx = q.correct_answer.toUpperCase().charCodeAt(0) - 65;
+ if (idx >= 0 && idx < optionsList.length) {
+ resolvedAnswer = optionsList[idx];
+ }
+ }
+ }
+
  return (
  <Card key={q.id} className="border border-gray-100 shadow-sm overflow-hidden rounded-2xl">
  <CardContent className="p-0">
@@ -74,7 +89,7 @@ export const QuizPreview = ({ quiz }: QuizPreviewProps) => {
  {q.type === 'mcq' && optionsList.length > 0 && (
  <div className="grid gap-2">
  {optionsList.map((opt, oIdx) => {
- const isCorrect = (oIdx + 1).toString() === q.correct_answer;
+ const isCorrect = (oIdx + 1).toString() === q.correct_answer || String.fromCharCode(65 + oIdx) === q.correct_answer.toUpperCase();
  return (
  <div 
  key={oIdx} 
@@ -93,12 +108,10 @@ export const QuizPreview = ({ quiz }: QuizPreviewProps) => {
  </div>
  )}
 
- {q.type !== 'mcq' && (
  <div className="p-4 rounded-xl border bg-emerald-50 border-emerald-200">
  <p className="text-xs font-bold text-emerald-700 uppercase mb-1">Correct Answer</p>
- <p className="text-sm text-emerald-900 font-medium">{q.correct_answer}</p>
+ <p className="text-sm text-emerald-900 font-medium">{resolvedAnswer}</p>
  </div>
- )}
 
  {q.explanation && (
  <div className="mt-4 p-4 rounded-xl bg-orange-50 border border-orange-100 flex items-start gap-3">

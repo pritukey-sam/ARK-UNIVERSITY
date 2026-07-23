@@ -1,39 +1,118 @@
 const API_URL = '/api';
 
+const PUBLIC_ENDPOINTS = [
+  '/login',
+  '/auth/first-login-reset',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/register-company'
+];
+
 export const api = {
- async request(endpoint: string, options: RequestInit = {}) {
- const token = localStorage.getItem('token');
- const headers: any = {
- ...(token ? { Authorization: `Bearer ${token}` } : {}),
- ...options.headers,
- };
- if (!(options.body instanceof FormData)) {
- headers['Content-Type'] = 'application/json';
- }
- const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  const text = await response.text();
-  let data: any = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch (e) {
-    data = { detail: text || `Server Error (${response.status})` };
-  }
- if (!response.ok) {
- if (response.status === 402) {
- window.location.href = '/payment';
- return;
- }
- if (response.status !== 401) {
- console.error(`API Error [${response.status}] on ${endpoint}:`, text);
- }
- let errorMessage = 'Something went wrong';
- if (typeof data.detail === 'string') errorMessage = data.detail;
- else if (Array.isArray(data.detail)) errorMessage = data.detail.map((e: any) => e.msg).join(', ');
- else if (data.error) errorMessage = data.error;
- throw new Error(errorMessage);
- }
- return data;
- },
+  async request(endpoint: string, options: RequestInit = {}) {
+    const isClient = typeof window !== 'undefined';
+
+    // Normalize endpoint path by stripping query params
+    const endpointPath = endpoint.split('?')[0];
+    const isPublic = PUBLIC_ENDPOINTS.includes(endpointPath);
+
+    const headers: any = {
+      ...options.headers,
+    };
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers,
+      credentials: 'include'
+    });
+    
+    if (response.status === 401) {
+      const text = await response.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        data = { detail: text };
+      }
+      
+      let errorMessage = '';
+      if (typeof data.detail === 'string') errorMessage = data.detail;
+      else if (Array.isArray(data.detail)) errorMessage = data.detail.map((e: any) => e.msg).join(', ');
+      else if (data.error) errorMessage = data.error;
+
+      const resolvedMessage = errorMessage || 'Login failed. Please check your credentials.';
+
+      if (isPublic) {
+        throw new Error(resolvedMessage);
+      }
+
+      if (isClient) {
+        const path = window.location.pathname;
+        const isLanding = path === '/';
+        const isPublicPage = isLanding || ['/login', '/register', '/payment', '/forgot-password', '/reset-password', '/register-company'].some(p => path.startsWith(p));
+        if (!isPublicPage) {
+          window.location.replace('/login?expired=true');
+        }
+      }
+      throw new Error(resolvedMessage || 'Session expired. Please log in again.');
+    }
+
+    const text = await response.text();
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      data = { detail: text || `Server Error (${response.status})` };
+    }
+
+    if (!response.ok) {
+      if (response.status === 402) {
+        if (isClient) {
+          window.location.replace('/payment');
+        }
+        return;
+      }
+      const isAuthOrSecurityResponse = 
+        response.status === 401 || 
+        response.status === 403 || 
+        /not enrolled/i.test(text) || 
+        /access denied/i.test(text) || 
+        /permission denied/i.test(text) || 
+        /enrollment required/i.test(text) || 
+        /unauthorized/i.test(text) || 
+        /forbidden/i.test(text);
+
+      const isFileUploadValidation = response.status === 400 && (
+        text.includes("Only PDF, DOCX, JPG, PNG and MP4 files are allowed.") ||
+        /file size exceeds/i.test(text)
+      );
+
+      const isExpectedValidation = (response.status === 400 && [
+        '/auth/first-login-reset',
+        '/login',
+        '/auth/reset-password',
+        '/auth/forgot-password'
+      ].includes(endpointPath)) || 
+      (response.status === 429 && endpointPath === '/login') ||
+      (response.status === 423 && endpointPath === '/login') ||
+      isAuthOrSecurityResponse ||
+      isFileUploadValidation;
+
+      if (!isExpectedValidation) {
+        console.error(`API Error [${response.status}] on ${endpoint}:`, text);
+      }
+      
+      let errorMessage = 'Something went wrong';
+      if (typeof data.detail === 'string') errorMessage = data.detail;
+      else if (Array.isArray(data.detail)) errorMessage = data.detail.map((e: any) => e.msg).join(', ');
+      else if (data.error) errorMessage = data.error;
+      throw new Error(errorMessage);
+    }
+    return data;
+  },
 
  get: (endpoint: string) => api.request(endpoint, { method: 'GET' }),
  post: (endpoint: string, body: any) => api.request(endpoint, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) }),
@@ -54,7 +133,11 @@ export const api = {
  },
 
  auth: {
- login: (credentials: any) => api.request('/login', { method: 'POST', body: JSON.stringify(credentials) }),
+  login: (credentials: any) => api.request('/login', { method: 'POST', body: JSON.stringify(credentials) }),
+  logout: () => api.request('/logout', { method: 'POST' }),
+  firstLoginReset: (data: any) => api.request('/auth/first-login-reset', { method: 'POST', body: JSON.stringify(data) }),
+  forgotPassword: (data: any) => api.request('/auth/forgot-password', { method: 'POST', body: JSON.stringify(data) }),
+  resetPassword: (data: any) => api.request('/auth/reset-password', { method: 'POST', body: JSON.stringify(data) }),
  },
 
  admin: {
@@ -84,6 +167,9 @@ export const api = {
  bulkQuizConfirm: (moduleId: number, data: any) => api.request(`/modules/${moduleId}/quizzes/bulk-confirm`, { method: 'POST', body: JSON.stringify(data) }),
  updateVideo: (videoId: number, data: any) => api.request(`/videos/${videoId}`, { method: 'PUT', body: JSON.stringify(data) }),
  getUserDetails: (userId: number) => api.request(`/users/${userId}`, { method: 'GET' }),
+ getCourseAccessRequests: () => api.request('/course-access-requests'),
+ approveCourseAccessRequest: (id: number) => api.request(`/course-access-requests/${id}/approve`, { method: 'POST' }),
+ rejectCourseAccessRequest: (id: number) => api.request(`/course-access-requests/${id}/reject`, { method: 'POST' }),
  },
 
  hr: {
@@ -98,6 +184,7 @@ export const api = {
  completeCourse: (courseId: number) => api.request(`/complete-course/${courseId}`, { method: 'POST' }),
  submitAssignment: (moduleId: number, formData: FormData) => api.request(`/modules/${moduleId}/submit`, { method: 'POST', body: formData }),
  attemptQuiz: (quizId: number, data: { answers: any[], time_taken: number }) => api.request(`/quizzes/${quizId}/attempt`, { method: 'POST', body: JSON.stringify(data) }),
+ getQuizAttempts: (quizId: number, userId?: number) => api.request(`/quiz-attempts?quiz_id=${quizId}${userId ? `&user_id=${userId}` : ''}`),
  getMySubmissions: () => api.request('/my-submissions'),
  getEmployeeAnalytics: () => api.request('/dashboard/employee-analytics'),
  markModuleComplete: (courseId: number, moduleId: number) => api.request('/progress/complete', { method: 'POST', body: JSON.stringify({ course_id: courseId, module_id: moduleId }) }),
@@ -109,6 +196,7 @@ export const api = {
  markNotesComplete: (data: { module_id: number, completed: boolean }) => api.request(`/progress/notes`, { method: 'POST', body: JSON.stringify(data) }),
  getVideoUrl: (videoId: number) => api.request(`/courses/video-url/${videoId}`),
  checkAccess: (courseId: number) => api.request(`/courses/${courseId}/check-access`),
+ requestAccess: (courseId: number) => api.request('/course-access-requests', { method: 'POST', body: JSON.stringify({ course_id: courseId }) }),
  },
 
  common: {

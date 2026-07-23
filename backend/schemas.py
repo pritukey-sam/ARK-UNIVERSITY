@@ -1,6 +1,16 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
+from validation import (
+    validate_email,
+    validate_name,
+    validate_designation,
+    validate_course_name,
+    validate_description,
+    validate_url,
+    validate_video_url,
+    validate_numeric_range
+)
 
 
 # ── MODULE SCHEMAS ─────────────────────────────────────────────────────────
@@ -17,9 +27,36 @@ class ModuleUpdate(BaseModel):
     description: Optional[str] = None
     order_index: Optional[int] = None
 
+    @field_validator('title')
+    @classmethod
+    def validate_module_title(cls, v):
+        if v is not None:
+            validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_module_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
 
 class ModuleCreate(ModuleBase):
     course_id: int
+
+    @field_validator('title')
+    @classmethod
+    def validate_module_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_module_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
 
 
 class ModuleOut(ModuleBase):
@@ -45,9 +82,29 @@ class VideoCreate(BaseModel):
     video_url: str
     duration_seconds: int = 0
 
-class VideoOut(VideoCreate):
+    @field_validator('title')
+    @classmethod
+    def validate_video_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('video_url')
+    @classmethod
+    def validate_vid_url(cls, v):
+        validate_video_url(v)
+        return v
+
+    @field_validator('duration_seconds')
+    @classmethod
+    def validate_dur(cls, v):
+        validate_numeric_range(v, 0, 86400, 'Duration')
+        return v
+
+class VideoOut(BaseModel):
     id: int
     module_id: int
+    title: str
+    video_url: str
     duration_seconds: int = 0
     created_at: datetime
 
@@ -62,9 +119,27 @@ class QuestionCreate(BaseModel):
     marks: int = 1
     explanation: Optional[str] = None
 
-class QuestionOut(QuestionCreate):
+    @field_validator('question_text')
+    @classmethod
+    def validate_question_txt(cls, v):
+        validate_description(v, is_required=True)
+        return v
+
+    @field_validator('marks')
+    @classmethod
+    def validate_q_marks(cls, v):
+        validate_numeric_range(v, 1, 100, 'Marks')
+        return v
+
+class QuestionOut(BaseModel):
     id: int
     quiz_id: int
+    type: str = "mcq"  # mcq, fill, short, code
+    question_text: str
+    options: Optional[str] = None  # JSON string for MCQ options
+    correct_answer: str
+    marks: int = 1
+    explanation: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -73,10 +148,17 @@ class QuizCreate(BaseModel):
     title: str
     questions: List[QuestionCreate]
 
+    @field_validator('title')
+    @classmethod
+    def validate_quiz_title(cls, v):
+        validate_course_name(v)
+        return v
+
 class QuizOut(BaseModel):
     id: int
     module_id: int
     title: str
+    time_limit: Optional[int] = 20
     questions: List[QuestionOut]
     created_at: datetime
 
@@ -117,7 +199,32 @@ class CourseBase(BaseModel):
 
 
 class CourseCreate(CourseBase):
-    pass
+    @field_validator('title')
+    @classmethod
+    def validate_course_title(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_course_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
+    @field_validator('thumbnail_url')
+    @classmethod
+    def validate_course_thumb(cls, v):
+        if v:
+            validate_url(v)
+        return v
+
+    @field_validator('completion_duration_days')
+    @classmethod
+    def validate_duration(cls, v):
+        if v is not None:
+            validate_numeric_range(v, 1, 365, 'Completion duration')
+        return v
 
 
 class CourseUpdate(BaseModel):
@@ -127,6 +234,34 @@ class CourseUpdate(BaseModel):
     curator_name: Optional[str] = None
     is_active: Optional[bool] = None
     completion_duration_days: Optional[int] = None
+
+    @field_validator('title')
+    @classmethod
+    def validate_course_title(cls, v):
+        if v is not None:
+            validate_course_name(v)
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_course_desc(cls, v):
+        if v is not None:
+            validate_description(v)
+        return v
+
+    @field_validator('thumbnail_url')
+    @classmethod
+    def validate_course_thumb(cls, v):
+        if v:
+            validate_url(v)
+        return v
+
+    @field_validator('completion_duration_days')
+    @classmethod
+    def validate_duration(cls, v):
+        if v is not None:
+            validate_numeric_range(v, 1, 365, 'Completion duration')
+        return v
 
 
 class CourseProgress(BaseModel):
@@ -150,6 +285,7 @@ class CourseOut(CourseBase):
     assigned_at: Optional[datetime] = None
     resume_module_id: Optional[int] = None
     modules: List[ModuleOut] = []
+    access_request_status: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -168,6 +304,7 @@ class CourseListOut(CourseBase):
     due_date: Optional[datetime] = None
     is_overdue: bool = False
     assigned_at: Optional[datetime] = None
+    access_request_status: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -270,7 +407,17 @@ class CompanyBase(BaseModel):
     company_code: Optional[str] = None
 
 class CompanyCreate(CompanyBase):
-    pass
+    @field_validator('name')
+    @classmethod
+    def validate_company_name(cls, v):
+        validate_course_name(v)
+        return v
+
+    @field_validator('plan_price')
+    @classmethod
+    def validate_price(cls, v):
+        validate_numeric_range(v, 0, 1000000, 'Price')
+        return v
 
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
@@ -279,6 +426,20 @@ class CompanyUpdate(BaseModel):
     company_code: Optional[str] = None
     is_suspended: Optional[bool] = None
     expiry_date: Optional[datetime] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_company_name(cls, v):
+        if v is not None:
+            validate_course_name(v)
+        return v
+
+    @field_validator('plan_price')
+    @classmethod
+    def validate_price(cls, v):
+        if v is not None:
+            validate_numeric_range(v, 0, 1000000, 'Price')
+        return v
 
 class CompanyOut(CompanyBase):
     id: int
@@ -297,9 +458,36 @@ class CompanyWithAdminCreate(CompanyCreate):
     admin_email: str
     admin_password: str
 
+    @field_validator('admin_name')
+    @classmethod
+    def validate_adm_name(cls, v):
+        validate_name(v)
+        return v
+
+    @field_validator('admin_email')
+    @classmethod
+    def validate_adm_email(cls, v):
+        validate_email(v)
+        return v
+
+    @field_validator('admin_password')
+    @classmethod
+    def validate_adm_password(cls, v):
+        if not v:
+            raise ValueError("Password is required")
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
 class RegistrationApproval(BaseModel):
     plan_type: str
     plan_price: float = 0.0
+
+    @field_validator('plan_price')
+    @classmethod
+    def validate_price(cls, v):
+        validate_numeric_range(v, 0, 1000000, 'Price')
+        return v
 
 
 # ── USER SCHEMAS ───────────────────────────────────────────────────────────
@@ -316,6 +504,7 @@ class UserOut(BaseModel):
     designation: Optional[str] = None
     plan_type: Optional[str] = "free"
     avatar_url: Optional[str] = None
+    is_active: Optional[bool] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     company_code: Optional[str] = None
@@ -357,6 +546,8 @@ class AssignmentRequestOut(BaseModel):
     approval_timestamp: Optional[datetime] = None
     completion_duration_days: Optional[int] = None
     employee_id: Optional[str] = None
+    request_type: Optional[str] = None
+    requested_by: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -374,4 +565,32 @@ class NotificationOut(BaseModel):
         from_attributes = True
 
 class NotificationCount(BaseModel):
-    unread_count: int
+    unread_count: int
+
+class CompanyWithAdminCreateOut(BaseModel):
+    message: str
+    company: CompanyOut
+    admin: UserOut
+
+class CourseAccessRequestCreate(BaseModel):
+    course_id: int
+
+class CourseAccessRequestOut(BaseModel):
+    id: int
+    user_id: int
+    course_id: int
+    status: str
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    
+    # Extra fields for UI convenience
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+    course_title: Optional[str] = None
+    reviewer_name: Optional[str] = None
+    employee_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True

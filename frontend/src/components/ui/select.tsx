@@ -37,31 +37,39 @@ function SelectTrigger({ className, children, ...props }: React.ComponentProps<t
 }
 
 function SelectContent({
- className,
- children,
- sideOffset = 4,
- ...props
-}: React.ComponentProps<typeof SelectPrimitive.Popup> & { sideOffset?: number }) {
- return (
- <SelectPrimitive.Portal>
- <SelectPrimitive.Positioner
- data-slot="select-positioner"
- sideOffset={sideOffset}
- className="z-[100]"
- >
- <SelectPrimitive.Popup
- data-slot="select-content"
- className={cn(
- "relative z-[100] max-h-96 min-w-[8rem] overflow-hidden rounded-md border border-[#ddd] bg-white text-[#111] shadow-lg data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0 data-[closed]:zoom-out-95 data-[open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
- className
- )}
- {...props}
- >
- {children}
- </SelectPrimitive.Popup>
- </SelectPrimitive.Positioner>
- </SelectPrimitive.Portal>
- )
+  className,
+  children,
+  sideOffset = 4,
+  align = "start",
+  alignItemWithTrigger,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Popup> & {
+  sideOffset?: number
+  align?: "start" | "center" | "end"
+  alignItemWithTrigger?: boolean
+}) {
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Positioner
+        data-slot="select-positioner"
+        sideOffset={sideOffset}
+        align={align}
+        alignItemWithTrigger={alignItemWithTrigger}
+        className="z-[100]"
+      >
+        <SelectPrimitive.Popup
+          data-slot="select-content"
+          className={cn(
+            "relative z-[100] max-h-96 min-w-[8rem] overflow-hidden rounded-md border border-[#ddd] bg-white text-[#111] shadow-lg data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0 data-[closed]:zoom-out-95 data-[open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+            className
+          )}
+          {...props}
+        >
+          {children}
+        </SelectPrimitive.Popup>
+      </SelectPrimitive.Positioner>
+    </SelectPrimitive.Portal>
+  )
 }
 
 function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.GroupLabel>) {

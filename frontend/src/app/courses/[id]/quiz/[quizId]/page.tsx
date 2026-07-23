@@ -82,13 +82,13 @@ export default function QuizPage({ params }: { params: Promise<{ id: string, qui
  <Card className="bg-white/5 border-white/10 text-center py-12">
  <CardHeader>
  <div className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center mb-6 ${
- result.score >= 70 ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'
+ result.status === "PASSED" ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'
  }`}>
  <Award className="w-12 h-12" />
  </div>
  <CardTitle className="text-4xl font-extrabold mb-2">Quiz Completed!</CardTitle>
  <CardDescription className="text-xl text-gray-400">
- You scored <span className="text-white font-bold">{result.score}%</span>
+ You scored <span className="text-white font-bold">{result.score} / {result.total_questions}</span>
  </CardDescription>
  </CardHeader>
  <CardContent className="space-y-8">
@@ -146,7 +146,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string, qui
  <Progress value={progress} className="h-2 bg-white/5" />
  <div className="flex justify-between text-xs text-gray-500 font-bold uppercase">
  <span>Progress {Math.round(progress)}%</span>
- <span>Lumina Pro LMS</span>
+ <span>ARK University Pro LMS</span>
  </div>
  </div>
 
