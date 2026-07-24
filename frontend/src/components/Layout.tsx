@@ -118,14 +118,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', roles: ['admin', 'employee', 'hr'] },
-    { label: 'Super Admin', icon: Activity, path: '/super-admin', roles: ['super_admin'] },
     { label: 'Courses', icon: BookOpen, path: '/courses', roles: ['admin', 'employee', 'hr'] },
-    { label: 'Companies', icon: Building2, path: '/super-admin/companies', roles: ['super_admin'] },
     { label: 'Users', icon: Users, path: '/users', roles: ['admin', 'hr'] },
     { label: 'Assigned Courses', icon: FileText, path: '/assignments', roles: ['hr', 'admin'] },
     { label: 'Course Requests', icon: Bookmark, path: '/course-requests', roles: ['admin'] },
     { label: 'Audit Log', icon: History, path: '/audit-log', roles: ['admin'] },
-    { label: 'Settings', icon: Settings, path: '/profile', roles: ['super_admin', 'admin', 'employee', 'hr'] },
+    { label: 'Settings', icon: Settings, path: '/profile', roles: ['admin', 'employee', 'hr'] },
   ];
 
   const filteredNav = navItems.filter(item => item.roles.includes(user?.role || ''));

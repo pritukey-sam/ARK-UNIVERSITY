@@ -7,7 +7,7 @@ interface User {
   id: number;
   email: string;
   name: string;
-  role: 'super_admin' | 'admin' | 'hr' | 'employee';
+  role: 'admin' | 'hr' | 'employee';
   company_id?: number;
   company_name?: string;
   employee_id?: string;

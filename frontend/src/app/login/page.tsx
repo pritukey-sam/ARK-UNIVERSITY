@@ -57,8 +57,8 @@ export default function LoginPage() {
       login(data.user);
       toast.success('Login successful');
       
-      if (data.user.role === 'super_admin') {
-        router.replace('/super-admin');
+      if (data.user.role === 'admin') {
+        router.replace('/dashboard');
       } else {
         router.replace('/dashboard');
       }

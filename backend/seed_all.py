@@ -21,13 +21,6 @@ def seed():
                 "avatar_initials": "AU"
             },
             {
-                "email": "superadmin@lumina.com",
-                "password": "SuperAdmin@123",
-                "name": "Super Admin",
-                "role": "super_admin",
-                "avatar_initials": "SA"
-            },
-            {
                 "email": "user@lumina.com",
                 "password": "User@123",
                 "name": "Regular Employee",
