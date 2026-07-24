@@ -19,124 +19,44 @@ def get_backend_env_path() -> str:
 def load_backend_env() -> str:
     env_path = get_backend_env_path()
     
-    print("[ENV-LOADER-DEBUG] ----------------------------------------", flush=True)
-    print(f"[ENV-LOADER-DEBUG] Attempting to load .env from: {env_path}", flush=True)
-    
     if not os.path.exists(env_path):
-        print(f"[ENV-LOADER-DEBUG] [X] .env file does NOT exist at path: {env_path}", flush=True)
-        print("[ENV-LOADER-DEBUG] ----------------------------------------", flush=True)
         return env_path
         
-    file_size = os.path.getsize(env_path)
-    print(f"[ENV-LOADER-DEBUG] [V] .env file exists. Size: {file_size} bytes", flush=True)
-    
-    # 1. RAW .ENV FILE CONTENT DEBUGGING (Read in binary first)
     try:
         with open(env_path, "rb") as f:
             raw_bytes = f.read()
-            
-        print(f"[ENV-LOADER-DEBUG] Raw File Bytes Count: {len(raw_bytes)}", flush=True)
         
-        # Detect Unicode BOM / signature
-        bom_detected = "None"
         encoding = "utf-8"
-        
         if raw_bytes.startswith(b"\xef\xbb\xbf"):
-            bom_detected = "UTF-8 BOM (\\xef\\xbb\\xbf)"
             encoding = "utf-8-sig"
-        elif raw_bytes.startswith(b"\xff\xfe"):
-            bom_detected = "UTF-16 LE BOM (\\xff\\xfe)"
-            encoding = "utf-16"
-        elif raw_bytes.startswith(b"\xfe\xff"):
-            bom_detected = "UTF-16 BE BOM (\\xfe\\xff)"
+        elif raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")):
             encoding = "utf-16"
             
-        print(f"[ENV-LOADER-DEBUG] Unicode BOM Detected: {bom_detected}", flush=True)
-        print(f"[ENV-LOADER-DEBUG] Chosen Decoding Encoding: {encoding}", flush=True)
-        
-        # Check for null bytes or corruption
-        if b"\x00" in raw_bytes:
-            print("[ENV-LOADER-DEBUG] [!] WARNING: Hidden NULL bytes (\\x00) detected in raw .env! This could corrupt standard parsers.", flush=True)
-            
-    except Exception as e:
-        print(f"[ENV-LOADER-DEBUG] [X] Failed to read raw binary of .env: {str(e)}", flush=True)
-        raw_bytes = b""
-        encoding = "utf-8"
+        decoded_content = raw_bytes.decode(encoding, errors="replace")
+    except Exception:
+        decoded_content = ""
 
-    # 2. FORCE UTF-8 ENV PARSING & DECODING
-    decoded_content = ""
-    try:
-        if raw_bytes:
-            decoded_content = raw_bytes.decode(encoding, errors="replace")
-            print("[ENV-LOADER-DEBUG] File decoded successfully.", flush=True)
-    except Exception as e:
-        print(f"[ENV-LOADER-DEBUG] [X] Decoding failed with '{encoding}'. Retrying with standard utf-8-sig (with error replacement)...", flush=True)
-        try:
-            decoded_content = raw_bytes.decode("utf-8-sig", errors="replace")
-        except Exception as e2:
-            print(f"[ENV-LOADER-DEBUG] [X] All decoding attempts failed: {str(e2)}", flush=True)
-            decoded_content = ""
-
-    # Normalize line endings (support Windows CRLF and standard LF)
     lines = decoded_content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    print(f"[ENV-LOADER-DEBUG] Total lines read: {len(lines)}", flush=True)
-    
-    # 3. MANUAL ENV FALLBACK PARSER & LINE DIAGNOSTICS
-    parsed_count = 0
-    for idx, line in enumerate(lines, 1):
+    for line in lines:
         stripped_line = line.strip()
-        
-        # Empty or comment lines
-        if not stripped_line:
-            print(f"  [Line {idx:02d}]: (empty line)", flush=True)
-            continue
-        if stripped_line.startswith("#"):
-            print(f"  [Line {idx:02d}]: {stripped_line} (comment)", flush=True)
+        if not stripped_line or stripped_line.startswith("#") or "=" not in stripped_line:
             continue
             
-        # Detect invalid formatting / invalid separators
-        if "=" not in stripped_line:
-            print(f"  [Line {idx:02d}]: [!] MALFORMED LINE (No '=' separator found): '{stripped_line}'", flush=True)
-            continue
-            
-        # Parse key-value
         parts = stripped_line.split("=", 1)
         key = parts[0].strip()
         val = parts[1].strip()
         
-        # Check invalid spaces in key
-        if " " in key:
-            print(f"  [Line {idx:02d}]: [!] WARNING: Spaces detected in environment key: '{key}'", flush=True)
-            
-        # Strip surrounding quotes from value
         if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
             val = val[1:-1].strip()
             
-        # Safe logging: mask credentials
-        masked_val = val
-        lower_key = key.lower()
-        if any(secret_term in lower_key for secret_term in ["pass", "secret", "key", "token"]):
-            if len(val) > 4:
-                masked_val = f"{val[:2]}...{val[-2:]} (masked, len={len(val)})"
-            else:
-                masked_val = "*** (masked)"
-        
-        print(f"  [Line {idx:02d}]: Key='{key}' | Value='{masked_val}'", flush=True)
-        
-        # Inject into os.environ only if not already set by host platform (e.g. Render)
         if key not in os.environ or not os.environ[key]:
             os.environ[key] = val
-        parsed_count += 1
         
-    print(f"[ENV-LOADER-DEBUG] Successfully injected {parsed_count} variables manually into os.environ.", flush=True)
-    
-    # Run standard load_dotenv just as a double check
     try:
-        load_dotenv(dotenv_path=env_path)
-    except Exception as e:
-        print(f"[ENV-LOADER-DEBUG] python-dotenv load_dotenv call raised exception: {str(e)}", flush=True)
+        load_dotenv(dotenv_path=env_path, override=False)
+    except Exception:
+        pass
         
-    print("[ENV-LOADER-DEBUG] ----------------------------------------", flush=True)
     return env_path
 
 def is_smtp_val_valid(val) -> bool:
@@ -145,7 +65,6 @@ def is_smtp_val_valid(val) -> bool:
     val_str = str(val).strip()
     if not val_str:
         return False
-    # Check for placeholder values
     if "<" in val_str or ">" in val_str or "COMPANY_" in val_str:
         return False
     return True
@@ -165,72 +84,12 @@ def is_smtp_configured() -> bool:
 
 def verify_and_log_smtp_config():
     """
-    On backend startup, validates the SMTP configuration, logs status with safely masked credentials,
-    and does not crash startup if crucial variables are missing or invalid.
+    On backend startup, validates the SMTP configuration silently.
     """
     try:
-        env_path = load_backend_env()
-        
-        smtp_host = os.getenv("SMTP_HOST") or os.getenv("EMAIL_HOST")
-        smtp_port = os.getenv("SMTP_PORT") or os.getenv("EMAIL_PORT")
-        smtp_user = os.getenv("SMTP_USER") or os.getenv("EMAIL_USER")
-        smtp_pass = os.getenv("SMTP_PASS") or os.getenv("EMAIL_PASS")
-        smtp_from = os.getenv("SMTP_FROM") or os.getenv("EMAIL_FROM")
-        
-        print("[STARTUP-DIAGNOSTICS] ----------------------------------------", flush=True)
-        print(f"[STARTUP-DIAGNOSTICS] Loading backend .env from: {env_path}", flush=True)
-        print(f"[STARTUP-DIAGNOSTICS] File exists: {os.path.exists(env_path)}", flush=True)
-        
-        variables = {
-            "SMTP_HOST": smtp_host,
-            "SMTP_PORT": smtp_port,
-            "SMTP_USER": smtp_user,
-            "SMTP_PASS": smtp_pass,
-            "SMTP_FROM": smtp_from
-        }
-        
-        for name, value in variables.items():
-            if not value:
-                print(f"[STARTUP-DIAGNOSTICS] {name}=MISSING", flush=True)
-            elif not is_smtp_val_valid(value):
-                print(f"[STARTUP-DIAGNOSTICS] {name}=PLACEHOLDER (INVALID)", flush=True)
-            else:
-                # Mask credentials
-                if name == "SMTP_USER":
-                    if "@" in value:
-                        parts = value.split("@")
-                        masked = f"{parts[0][:3]}***@{parts[1]}"
-                    else:
-                        masked = f"{value[:3]}***"
-                    print(f"[STARTUP-DIAGNOSTICS] {name}={masked} (LOADED)", flush=True)
-                elif name == "SMTP_PASS":
-                    masked = f"{value[:2]}***{value[-2:]}" if len(value) > 4 else "***"
-                    print(f"[STARTUP-DIAGNOSTICS] {name}={masked} (LOADED)", flush=True)
-                else:
-                    print(f"[STARTUP-DIAGNOSTICS] {name}={value} (LOADED)", flush=True)
-        
-        # Check overall validity
-        missing_or_invalid = []
-        for name, value in variables.items():
-            if name != "SMTP_FROM":  # SMTP_FROM is optional / has fallback
-                if not value:
-                    missing_or_invalid.append(f"{name} (MISSING)")
-                elif not is_smtp_val_valid(value):
-                    missing_or_invalid.append(f"{name} (PLACEHOLDER)")
-                    
-        if missing_or_invalid:
-            print(f"[STARTUP-DIAGNOSTICS] [!] WARNING: SMTP configuration is incomplete or invalid: {', '.join(missing_or_invalid)}.", flush=True)
-            print("[STARTUP-DIAGNOSTICS] SMTP operations will use the local console fallback dump.", flush=True)
-            print("[STARTUP-DIAGNOSTICS] FastAPI startup will proceed safely.", flush=True)
-            print("[STARTUP-DIAGNOSTICS] ----------------------------------------", flush=True)
-        else:
-            print("[STARTUP-DIAGNOSTICS] [V] SMTP configuration validated successfully!", flush=True)
-            print("[STARTUP-DIAGNOSTICS] ----------------------------------------", flush=True)
-            
-    except Exception as e:
-        print(f"[STARTUP-DIAGNOSTICS] [!] CRITICAL: Exception raised during SMTP config validation: {str(e)}", flush=True)
-        print("[STARTUP-DIAGNOSTICS] FastAPI startup will proceed safely using fallback mode.", flush=True)
-        print("[STARTUP-DIAGNOSTICS] ----------------------------------------", flush=True)
+        load_backend_env()
+    except Exception:
+        pass
 
 def send_html_email(to_email: str, subject: str, html_content: str, text_content: str = "") -> bool:
     """

@@ -124,11 +124,10 @@ app.mount("/uploads", CustomStaticFiles(directory="uploads"), name="uploads")
 # ── STARTUP ────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
-    print("ARK University LMS API started - User router included")
     from services.email_service import verify_and_log_smtp_config
     verify_and_log_smtp_config()
     create_tables()
-    print("ARK University LMS API started - tables checked")
+    print("INFO:     ARK University LMS API started successfully")
 
 # ── HEALTH CHECK ───────────────────────────────────────────────────────────
 @app.get("/")
