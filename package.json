@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "ARK University LMS - Next.js & FastAPI",
   "scripts": {
+    "build": "cd frontend && npm run build",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && python main.py",
     "install:all": "cd frontend && npm install && cd ../backend && pip install -r requirements.txt"
