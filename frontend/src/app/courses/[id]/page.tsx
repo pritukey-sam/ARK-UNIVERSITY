@@ -39,7 +39,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
   const [isCourseEditOpen, setIsCourseEditOpen] = useState(false);
   const [isCourseDeleteOpen, setIsCourseDeleteOpen] = useState(false);
 
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin';
   const isEmployee = currentUser?.role === 'employee';
 
   useEffect(() => { fetchData(); }, [id, currentUser]);
@@ -174,7 +174,7 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                   </div>
                   <div>
                     <p className="text-[10px] text-[#6A6F73] uppercase tracking-wide font-semibold">Duration</p>
-                    <p className="text-sm font-bold text-[#111]">{formatDuration(totalDuration)}</p>
+                    <p className="text-sm font-bold text-[#111]">{course.completion_duration_days || 30} Days</p>
                   </div>
                 </div>
                 {isEmployee && completedCount > 0 && (
@@ -229,14 +229,6 @@ export default function CourseDetailsPage({ params }: { params: Promise<{ id: st
                   >
                     {progressPct === 0 ? 'Start Learning' : progressPct === 100 ? 'Review Course' : 'Continue Learning'}
                     <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                ) : currentUser?.role === 'super_admin' ? (
-                  <Button
-                    className="bg-[#F26522] hover:bg-[#D54D10] text-white h-11 px-6 font-semibold"
-                    onClick={() => router.push(course.modules?.[0] ? `/courses/${id}/modules/${course.modules[0].id}/preview` : `#`)}
-                    disabled={!course.modules || course.modules.length === 0}
-                  >
-                    Preview Course <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 ) : null}
               </div>

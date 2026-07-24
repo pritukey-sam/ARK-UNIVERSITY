@@ -160,7 +160,7 @@ export default function CoursesPage() {
                                 <div className="flex items-center gap-1">
                                   <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
                                 </div>
-                                <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                                <span>{course.completion_duration_days || 30} Days</span>
                               </div>
                             </CardContent>
                           </Card>
@@ -213,7 +213,7 @@ export default function CoursesPage() {
                                   <div className="flex items-center gap-1">
                                     <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
                                   </div>
-                                  <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                                  <span>{course.completion_duration_days || 30} Days</span>
                                 </div>
 
                                 {(!course.is_enrolled && course.progress?.status !== 'completed') && (
@@ -283,7 +283,7 @@ export default function CoursesPage() {
                           <div className="flex items-center gap-1">
                             <BookOpen className="w-3 h-3" /> {course.total_modules} Modules
                           </div>
-                          <span>{formatDuration(course.total_duration_seconds || 0)}</span>
+                          <span>{course.completion_duration_days || 30} Days</span>
                         </div>
                       </CardContent>
                     </Card>
