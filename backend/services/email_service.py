@@ -123,8 +123,9 @@ def load_backend_env() -> str:
         
         print(f"  [Line {idx:02d}]: Key='{key}' | Value='{masked_val}'", flush=True)
         
-        # Inject into os.environ
-        os.environ[key] = val
+        # Inject into os.environ only if not already set by host platform (e.g. Render)
+        if key not in os.environ or not os.environ[key]:
+            os.environ[key] = val
         parsed_count += 1
         
     print(f"[ENV-LOADER-DEBUG] Successfully injected {parsed_count} variables manually into os.environ.", flush=True)
