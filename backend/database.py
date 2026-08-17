@@ -320,6 +320,56 @@ def create_tables():
                 print("Ensured admin_id is nullable in assignment_requests table")
 
         print("Database tables verified/created")
+        seed_initial_data()
     except Exception as e:
         print(f"Warning: Could not verify/create tables: {e}")
         print("Continuing startup... (assuming tables already exist)")
+
+
+def seed_initial_data():
+    """Auto-seed initial admin and default user if no admin user exists."""
+    try:
+        from models import User
+        from auth import hash_password
+        
+        db = SessionLocal()
+        try:
+            # Check if any admin user exists
+            existing_admin = db.query(User).filter(User.role == "admin").first()
+            if not existing_admin:
+                print("INFO:     No admin user found in database. Auto-seeding default admin...")
+                admin_user = User(
+                    email="admin@lumina.com",
+                    password_hash=hash_password("Admin@123"),
+                    name="Admin User",
+                    role="admin",
+                    avatar_initials="AU",
+                    is_active=True,
+                    is_first_login=False
+                )
+                db.add(admin_user)
+                db.commit()
+                print("INFO:     [AUTO-SEED SUCCESS] Default admin created: admin@lumina.com / Admin@123")
+            else:
+                print(f"INFO:     [AUTO-SEED SKIP] Admin user already exists ({existing_admin.email}).")
+
+            # Check if default regular user exists
+            existing_user = db.query(User).filter(User.email == "user@lumina.com").first()
+            if not existing_user:
+                print("INFO:     No default user found. Auto-seeding regular user...")
+                reg_user = User(
+                    email="user@lumina.com",
+                    password_hash=hash_password("User@123"),
+                    name="Regular Employee",
+                    role="user",
+                    avatar_initials="RE",
+                    is_active=True,
+                    is_first_login=False
+                )
+                db.add(reg_user)
+                db.commit()
+                print("INFO:     [AUTO-SEED SUCCESS] Default user created: user@lumina.com / User@123")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"Warning: Could not auto-seed initial data: {e}")
