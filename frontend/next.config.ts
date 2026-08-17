@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://ark-university.onrender.com";
+// Local backend URL (Render URL commented for local testing)
+// const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://ark-university.onrender.com";
+const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
   experimental: {
