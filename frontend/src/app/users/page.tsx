@@ -117,7 +117,7 @@ export default function UsersPage() {
       ]);
       setUsers(usersData);
       setCourses(coursesData);
-      setHrUsers(usersData.filter((u: any) => u.role === 'hr' || u.role === 'admin' || u.role === 'super_admin'));
+      setHrUsers(usersData.filter((u: any) => u.role === 'hr' || u.role === 'admin'));
     } catch (error: any) {
       toast.error("Failed to load user management data");
     } finally {
@@ -308,7 +308,7 @@ export default function UsersPage() {
       const uRole = (u.role || '').toLowerCase();
 
       // Hide/remove Admin and Super Admin accounts from this users listing
-      if (uRole === 'admin' || uRole === 'super_admin' || uRole === 'platform_admin') return false;
+      if (uRole === 'admin' || uRole === 'platform_admin') return false;
 
       // Base visibility logic
       if (currentUser?.role === 'hr') {
@@ -384,11 +384,11 @@ export default function UsersPage() {
   const stats = {
     total: users.filter(u => {
       const r = (u.role || '').toLowerCase();
-      return r !== 'admin' && r !== 'super_admin' && r !== 'platform_admin';
+      return r !== 'admin' && r !== 'platform_admin';
     }).length,
     admins: users.filter(u => {
       const r = (u.role || '').toLowerCase();
-      return r === 'admin' || r === 'super_admin' || r === 'platform_admin';
+      return r === 'admin' || r === 'platform_admin';
     }).length,
     hr: users.filter(u => {
       const r = (u.role || '').toLowerCase();
@@ -434,7 +434,7 @@ export default function UsersPage() {
           <p className="text-gray-500 font-medium mt-1">Manage workforce identities and course assignments.</p>
         </div>
         <div className="flex gap-4 items-center w-full md:w-auto">
-          {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') && (
+          {(currentUser?.role === 'admin') && (
             <Button onClick={() => {
               setFormData({ name: '', email: '', role: 'employee', department: 'Engineering', designation: '', employee_id: '' });
               setIsAddModalOpen(true);
@@ -685,7 +685,7 @@ export default function UsersPage() {
       </div>
 
       {/* Add User Modal */}
-      {(currentUser?.role === 'admin' || currentUser?.role === 'super_admin') && (
+      {(currentUser?.role === 'admin') && (
         <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
           <DialogContent className="bg-white sm:max-w-md rounded-2xl border border-gray-100 shadow-2xl p-6 md:p-8 [&>button]:rounded-full [&>button]:hover:bg-gray-100 [&>button]:transition-colors">
             <DialogHeader className="space-y-1.5">

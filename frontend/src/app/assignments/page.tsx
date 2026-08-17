@@ -44,7 +44,7 @@ export default function AssignmentsPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const isAuthority = user?.role === 'hr' || user?.role === 'admin' || user?.role === 'super_admin';
+      const isAuthority = user?.role === 'hr' || user?.role === 'admin';
       const [reqData, usersData, coursesData] = await Promise.all([
         api.assignments.getAll(),
         isAuthority ? api.admin.getUsers() : Promise.resolve([]),
@@ -53,7 +53,7 @@ export default function AssignmentsPage() {
       setRequests(reqData);
       if (isAuthority) {
         setUsers(usersData.filter((u: any) => u.role === 'employee'));
-        setHrUsers(usersData.filter((u: any) => u.role === 'hr' || u.role === 'admin' || u.role === 'super_admin'));
+        setHrUsers(usersData.filter((u: any) => u.role === 'hr' || u.role === 'admin'));
         setCourses(coursesData);
       }
     } catch (error) {
@@ -233,7 +233,7 @@ export default function AssignmentsPage() {
             {user?.role === 'admin' ? 'Review and manage all corporate learning assignments.' : 'Assign courses to your workforce and track progress.'}
           </p>
         </div>
-        {(user?.role === 'hr' || user?.role === 'admin' || user?.role === 'super_admin') && (
+        {(user?.role === 'hr' || user?.role === 'admin') && (
           <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
             <DialogTrigger
               render={

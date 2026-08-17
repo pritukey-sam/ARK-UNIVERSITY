@@ -196,7 +196,7 @@ function PreviewContent({ id, moduleId }: { id: string, moduleId: string }) {
   const { user } = useAuth();
 
   const activeTab = searchParams.get('tab') || 'video';
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin';
 
   const [module, setModule] = useState<any>(null);
   const [course, setCourse] = useState<any>(null);

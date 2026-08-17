@@ -50,7 +50,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
   const [designationError, setDesignationError] = useState('');
   const [employeeIdError, setEmployeeIdError] = useState('');
 
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
     if (!isEditModalOpen) {
@@ -259,7 +259,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
                   <h1 className="text-2xl font-black text-gray-900 tracking-tight">{user.name}</h1>
                   <Badge className={cn(
                     "text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border-none shadow-none",
-                    user.role === 'admin' || user.role === 'super_admin' ? 'bg-orange-50 text-[#F26522]' : 
+                    user.role === 'admin' ? 'bg-orange-50 text-[#F26522]' : 
                     user.role === 'hr' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
                   )}>
                     {user.role.replace('_', ' ')}

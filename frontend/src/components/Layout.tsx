@@ -36,7 +36,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin';
   const isStaff = isAdmin || user?.role === 'hr';
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (savedState) setIsCollapsed(savedState === 'true');
 
     let interval: any;
-    if (user && (user.role === 'super_admin' || user.role === 'admin' || user.role === 'hr')) {
+    if (user && (user.role === 'admin' || user.role === 'hr')) {
       fetchNotifications();
       interval = setInterval(fetchNotifications, 30000); // Poll every 30s
     }

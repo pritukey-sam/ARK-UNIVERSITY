@@ -49,11 +49,11 @@ export default function AuditLogPage() {
   const stats = useMemo(() => {
     const total = logs.length;
     const adminActions = logs.filter(l => 
-      l.actor_role === 'admin' || l.actor_role === 'super_admin'
+      l.actor_role === 'admin'
     ).length;
     const hrActions = logs.filter(l => l.actor_role === 'hr').length;
     const employeeActions = logs.filter(l => 
-      l.actor_role !== 'admin' && l.actor_role !== 'super_admin' && l.actor_role !== 'hr'
+      l.actor_role !== 'admin' && l.actor_role !== 'hr'
     ).length;
 
     return { total, adminActions, hrActions, employeeActions };
@@ -147,7 +147,7 @@ export default function AuditLogPage() {
                   
                   // Premium badge color styling per instructions
                   let badgeClass = "bg-gray-100 text-gray-700 border-gray-200";
-                  if (role === 'admin' || role === 'super_admin') {
+                  if (role === 'admin') {
                     badgeClass = "bg-red-50 text-red-700 border-red-200/60";
                   } else if (role === 'hr') {
                     badgeClass = "bg-blue-50 text-blue-700 border-blue-200/60";
